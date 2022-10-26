@@ -2,9 +2,12 @@
 #include <stdlib.h>
 
 #include "ScopedTime.h"
+#define ENABLE_KMEANSPP_IMPLEMENTATION 1
 #include "kmeanspp.h"
 
-const float dataPoints[] =
+#define POINT_COUNT 114
+
+const float dataPoints[POINT_COUNT*3] =
 {
 0.382683f, 0.923880f, 0.00000e+0f,
 0.353553f, 0.923880f, 0.146447f,
@@ -124,5 +127,12 @@ const float dataPoints[] =
 
 int main(int argc,const char **argv)
 {
-
+    kmeanspp::KmeansPP *kpp = kmeanspp::KmeansPP::create();
+    uint32_t resultPointCount;
+    const float *results = kpp->compute(dataPoints,POINT_COUNT,16,resultPointCount);
+    for (uint32_t i=0; i<resultPointCount; i++)
+    {
+        printf("[%d] = (%0.9f,%0.9f,%0.9f)\n", i, results[i*3+0],results[i*3+1],results[i*3+2]);
+    }
+    kpp->release();
 }

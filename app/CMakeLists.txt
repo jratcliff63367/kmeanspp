@@ -11,7 +11,7 @@ set(CMAKE_CXX_STANDARD 11)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-add_executable(main.cpp)
+add_executable(kmeanspp main.cpp)
 
 target_include_directories(kmeanspp PUBLIC "../include")
 # On Linux we need to add pthread to the link

@@ -40,6 +40,8 @@ protected:
 
 }
 
+#if ENABLE_KMEANSPP_IMPLEMENTATION
+
 #include <random>
 #include <vector>
 
@@ -468,3 +470,4 @@ KmeansPP *KmeansPP::create(void)
 
 
 }
+#endif
