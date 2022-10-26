@@ -4,6 +4,8 @@
 #include "ScopedTime.h"
 #define ENABLE_KMEANSPP_IMPLEMENTATION 1
 #include "kmeanspp.h"
+#define ENABLE_KMEANS_IMPLEMENTATION 1
+#include "kmeans.h"
 
 #define POINT_COUNT 114
 
@@ -127,12 +129,28 @@ const float dataPoints[POINT_COUNT*3] =
 
 int main(int argc,const char **argv)
 {
-    kmeanspp::KmeansPP *kpp = kmeanspp::KmeansPP::create();
-    uint32_t resultPointCount;
-    const float *results = kpp->compute(dataPoints,POINT_COUNT,16,resultPointCount);
-    for (uint32_t i=0; i<resultPointCount; i++)
+#if 0
     {
-        printf("[%d] = (%0.9f,%0.9f,%0.9f)\n", i, results[i*3+0],results[i*3+1],results[i*3+2]);
+        kmeanspp::KmeansPP *kpp = kmeanspp::KmeansPP::create();
+        uint32_t resultPointCount;
+        const float *results = kpp->compute(dataPoints,POINT_COUNT,16,resultPointCount);
+        for (uint32_t i=0; i<resultPointCount; i++)
+        {
+            printf("[%d] = (%0.9f,%0.9f,%0.9f)\n", i, results[i*3+0],results[i*3+1],results[i*3+2]);
+        }
+        kpp->release();
     }
-    kpp->release();
+#endif
+#if 1
+    {
+        kmeans::Kmeans *kpp = kmeans::Kmeans::create();
+        uint32_t resultPointCount;
+        const float *results = kpp->compute(dataPoints, POINT_COUNT, 16, resultPointCount);
+        for (uint32_t i = 0; i < resultPointCount; i++)
+        {
+            printf("[%d] = (%0.9f,%0.9f,%0.9f)\n", i, results[i * 3 + 0], results[i * 3 + 1], results[i * 3 + 2]);
+        }
+        kpp->release();
+    }
+#endif
 }
