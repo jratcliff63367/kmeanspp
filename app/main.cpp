@@ -129,7 +129,7 @@ const float dataPoints[POINT_COUNT*3] =
 
 int main(int argc,const char **argv)
 {
-#if 0
+#if 1
     {
         kmeanspp::KmeansPP *kpp = kmeanspp::KmeansPP::create();
         uint32_t resultPointCount;

@@ -123,7 +123,8 @@ std::vector<std::array<T, N>> random_plusplus(const std::vector<std::array<T, N>
 	// Select first mean at random from the set
 	{
 		std::uniform_int_distribution<input_size_t> uniform_generator(0, data.size() - 1);
-		means.push_back(data[uniform_generator(rand_engine)]);
+        size_t rindex = uniform_generator(rand_engine);
+		means.push_back(data[rindex]);
 	}
 
 	for (uint32_t count = 1; count < k; ++count) {
@@ -168,7 +169,8 @@ template <typename T, size_t N>
 std::vector<uint32_t> calculate_clusters(
 	const std::vector<std::array<T, N>>& data, const std::vector<std::array<T, N>>& means) {
 	std::vector<uint32_t> clusters;
-	for (auto& point : data) {
+	for (auto& point : data) 
+    {
 		clusters.push_back(closest_mean(point, means));
 	}
 	return clusters;
@@ -200,6 +202,7 @@ std::vector<std::array<T, N>> calculate_means(const std::vector<std::array<T, N>
 			}
 		}
 	}
+
 	return means;
 }
 
@@ -318,7 +321,7 @@ std::tuple<std::vector<std::array<T, N>>, std::vector<uint32_t>> kmeans_lloyd(
 	assert(parameters.get_k() > 0); // k must be greater than zero
 	assert(data.size() >= parameters.get_k()); // there must be at least k data points
 	std::random_device rand_device;
-	uint64_t seed = parameters.has_random_seed() ? parameters.get_random_seed() : rand_device();
+	uint64_t seed = 0; //parameters.has_random_seed() ? parameters.get_random_seed() : rand_device();
 	std::vector<std::array<T, N>> means = details::random_plusplus(data, parameters.get_k(), seed);
 
 	std::vector<std::array<T, N>> old_means;
@@ -326,15 +329,18 @@ std::tuple<std::vector<std::array<T, N>>, std::vector<uint32_t>> kmeans_lloyd(
 	std::vector<uint32_t> clusters;
 	// Calculate new means until convergence is reached or we hit the maximum iteration count
 	uint64_t count = 0;
+    bool c1,c2,c3,c4;
 	do {
 		clusters = details::calculate_clusters(data, means);
 		old_old_means = old_means;
 		old_means = means;
 		means = details::calculate_means(data, clusters, old_means, parameters.get_k());
 		++count;
-	} while (means != old_means && means != old_old_means
-		&& !(parameters.has_max_iteration() && count == parameters.get_max_iteration())
-		&& !(parameters.has_min_delta() && details::deltas_below_limit(details::deltas(old_means, means), parameters.get_min_delta())));
+        c1 = means != old_means;
+        c2 = means != old_old_means;
+        c3 = !(parameters.has_max_iteration() && count == parameters.get_max_iteration());
+        c4 = !(parameters.has_min_delta() && details::deltas_below_limit(details::deltas(old_means, means), parameters.get_min_delta()));
+	} while ( c1 && c2 && c3 && c4 );
 
 	return std::tuple<std::vector<std::array<T, N>>, std::vector<uint32_t>>(means, clusters);
 }
@@ -432,15 +438,7 @@ public:
 
         Point3fVector points;
         points.resize(pointCount);
-        for (uint32_t i = 0; i < pointCount; i++)
-        {
-            const float *p = &sourcePoints[i * 3];
-            Point3f pp;
-            pp[0] = p[0];
-            pp[1] = p[1];
-            pp[2] = p[2];
-            points[i] = pp;
-        }
+        memcpy(&points[0],sourcePoints,sizeof(Point3f)*pointCount);
 
         auto reduced = dkm::kmeans_lloyd(points, maxPoints);
         mResultsF = std::get<0>(reduced);

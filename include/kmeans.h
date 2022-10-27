@@ -15,6 +15,8 @@ public:
         uint32_t maxPoints,
         uint32_t &resultPointCount) = 0;
 
+
+
     virtual void release(void) = 0;
 protected:
     virtual ~Kmeans(void)
@@ -83,16 +85,88 @@ public:
     {
         const float *ret = nullptr;
 
+        mK = maxPoints;
         mMeans.clear();
-        mMeans.reserve(maxPoints);
-        mClusters.clear();
-        mClusters.reserve(maxPoints);
+        mMeans.reserve(mK);
+
+        mClusters.resize(pointCount);
+
         mData.resize(pointCount);
         memcpy(&mData[0],sourcePoints,sizeof(float)*3*pointCount);
+
         initializeClusters();
 
+        uint32_t count = 0;
+        uint32_t maxIterations = 100;
+        mOldMeans = mMeans;
+        mOldOldMeans = mMeans;
+        do 
+        {
+            calculateClusters();
+            mOldOldMeans = mOldMeans;
+            mOldMeans = mMeans;
+            calculateMeans();
+            count++;
+            if ( sameMeans(mMeans,mOldMeans))
+            {
+                break;
+            }
+            if (sameMeans(mMeans, mOldOldMeans))
+            {
+                break;
+            }
+        } while ( count < maxIterations );
+
+        resultPointCount = mK;
+        ret = &mMeans[0].x;
 
         return ret;
+    }
+
+    bool sameMeans(const Point3Vector &a,const Point3Vector &b)
+    {
+        bool ret = false;
+
+        if ( memcmp(&a[0],&b[0],sizeof(Point3)*mK) == 0 )
+        {
+            ret = true;
+        }
+
+        return ret;
+    }
+
+    void calculateMeans(void)
+    {
+        std::vector< uint32_t > counts;
+        counts.resize(mK);
+        memset(&counts[0],0,sizeof(uint32_t)*mK);
+        memset(&mMeans[0],0,sizeof(Point3)*mK);
+
+        for (size_t i=0; i<mClusters.size(); i++)
+        {
+            uint32_t id = mClusters[i];
+            auto &mean = mMeans[id];
+            counts[id]++;
+
+            const auto &p = mData[i];
+            mean.x+=p.x;
+            mean.y+=p.y;
+            mean.z+=p.z;
+        }
+        for (size_t i=0; i<mK; i++)
+        {
+            if ( counts[i] == 0 )
+            {
+                mMeans[i] = mOldMeans[i];
+            }
+            else
+            {
+                float recip = 1.0f / float(counts[i]);
+                mMeans[i].x*=recip;
+                mMeans[i].y*=recip;
+                mMeans[i].z*=recip;
+            }
+        }
     }
 
     virtual void release(void) final
@@ -103,14 +177,15 @@ public:
     void initializeClusters(void)
     {
         std::random_device rand_device;
-        uint64_t seed = rand_device();
+        uint64_t seed = 0; //rand_device();
         // Using a very simple PRBS generator, parameters selected according to
         // https://en.wikipedia.org/wiki/Linear_congruential_generator#Parameters_in_common_use
         std::linear_congruential_engine<uint64_t, 6364136223846793005, 1442695040888963407, UINT64_MAX> rand_engine(seed);
         // Select first mean at random from the set
         {
             std::uniform_int_distribution<size_t> uniform_generator(0, mData.size() - 1);
-            mMeans.push_back(mData[uniform_generator(rand_engine)]);
+            size_t rindex = uniform_generator(rand_engine);
+            mMeans.push_back(mData[rindex]);
         }
 
         for (uint32_t count = 1; count < mK; ++count) 
@@ -122,10 +197,10 @@ public:
             std::discrete_distribution<size_t> generator(distances.begin(), distances.end());
             mMeans.push_back(mData[generator(rand_engine)]);
         }
-
     }
 
-    DistanceVector closestDistance(const Point3Vector &means,const Point3Vector &data) 
+    DistanceVector closestDistance(const Point3Vector &means,
+                                   const Point3Vector &data) 
     {
         DistanceVector distances;
         distances.reserve(data.size());
@@ -145,9 +220,35 @@ public:
         return distances;
     }
 
+    void calculateClusters(void)
+    {
+        for (size_t i=0; i<mData.size(); i++)
+        {
+            mClusters[i] = closestMean(mData[i]);
+        }
+    }
+
+    uint32_t closestMean(const Point3 &p) const
+    {
+        uint32_t ret = 0;
+        float closest = FLT_MAX;
+        for (uint32_t i=0; i<mK; i++)
+        {
+            float d2 = p.distanceSquared(mMeans[i]);
+            if ( d2 < closest )
+            {
+                closest = d2;
+                ret = i;
+            }
+        }
+        return ret;
+    }
+
     uint32_t        mK{32};     // Maximum number of mean values to produce
     Point3Vector    mData;      // Input data
     Point3Vector    mMeans;     // Means
+    Point3Vector    mOldMeans;  // Means on the previous iteration
+    Point3Vector    mOldOldMeans;  // Means on the previous iteration
     ClusterVector   mClusters;  // Which cluster each source data point is in
 };
 
