@@ -282,12 +282,13 @@ public:
             size_t rindex = uniform_generator(rand_engine);
             mMeans.push_back(mData[rindex]);
         }
-
+        DistanceVector distances;
+        distances.resize(mData.size());
         for (uint32_t count = 1; count < mK; ++count) 
         {
             Timer t;
             // Calculate the distance to the closest mean for each data point
-            auto distances = closestDistance(mMeans, mData);
+            closestDistance(mMeans, mData, distances);
             mTimeClosestDistances+=t.getElapsedSeconds();
             // Pick a random point weighted by the distance from existing means
             // TODO: This might convert floating point weights to ints, distorting the distribution for small weights
@@ -297,14 +298,12 @@ public:
         }
     }
 
-    DistanceVector closestDistance(const Point3Vector &means,
-                                   const Point3Vector &data) 
+    void closestDistance(const Point3Vector &means,const Point3Vector &data,DistanceVector &distances) 
     {
-        DistanceVector distances;
-        distances.reserve(data.size());
+        uint32_t index = 0;
         for (auto& d : data) 
         {
-            float closest = d.distanceSquared(means[0]);
+            float closest = FLT_MAX;
             for (auto& m : means) 
             {
                 float distance = d.distanceSquared(m);
@@ -313,9 +312,9 @@ public:
                     closest = distance;
                 }
             }
-            distances.push_back(closest);
+            distances[index] = closest;
+            index++;
         }
-        return distances;
     }
 
     void calculateClusters(void)

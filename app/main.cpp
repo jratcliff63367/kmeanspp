@@ -26,7 +26,7 @@ int main(int argc,const char **argv)
     printf("Running Kmeans against:%d input points.\n", pointCount);
     {
         ScopedTime st("Kmeans Time");
-        const float *results = kpp->compute(points, pointCount, 1000, resultPointCount);
+        const float *results = kpp->compute(points, pointCount, 16, resultPointCount);
     }
     kpp->release();
 }
