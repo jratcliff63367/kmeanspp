@@ -22,9 +22,18 @@ class NodeBundle
 {
     struct NodeStorage 
     {
-        bool IsFull() const;
+        bool isFull() const
+        {
+            return m_index == MaxBundleSize;
+        }
 
-        T& GetNextNode();
+        T& getNextNode()
+        {
+            assert(m_index < MaxBundleSize);
+            T& ret = m_nodes[m_index];
+            m_index++;
+            return ret;
+        }
 
         std::size_t m_index;
         std::array<T, MaxBundleSize> m_nodes;
@@ -34,54 +43,30 @@ class NodeBundle
     typename std::list<NodeStorage>::iterator m_head{ m_list.end() };
 
 public:
-    T& GetNextNode();
-
-    T& GetFirstNode();
-
-    void Clear();
-};
-
-template <typename T, std::size_t MaxBundleSize>
-bool NodeBundle<T, MaxBundleSize>::NodeStorage::IsFull() const
-{
-    return m_index == MaxBundleSize;
-}
-
-template <typename T, std::size_t MaxBundleSize>
-T& NodeBundle<T, MaxBundleSize>::NodeStorage::GetNextNode()
-{
-    assert(m_index < MaxBundleSize);
-    T& ret = m_nodes[m_index];
-    m_index++;
-    return ret;
-}
-
-template <typename T, std::size_t MaxBundleSize>
-T& NodeBundle<T, MaxBundleSize>::GetNextNode()
-{
-    /*
-     * || short circuits, so doesn't dereference if m_bundle == m_bundleHead.end()
-     */
-    if (   m_head == m_list.end() || m_head->IsFull())
+    T& getNextNode()
     {
-        m_head = m_list.emplace(m_list.end());
+        /*
+         * || short circuits, so doesn't dereference if m_bundle == m_bundleHead.end()
+         */
+        if (   m_head == m_list.end() || m_head->isFull())
+        {
+            m_head = m_list.emplace(m_list.end());
+        }
+        return m_head->getNextNode();
     }
 
-    return m_head->GetNextNode();
-}
+    T& getFirstNode()
+    {
+        assert(m_head != m_list.end());
+        return m_list.front().m_nodes[0];
+    }
 
-template <typename T, std::size_t MaxBundleSize>
-T& NodeBundle<T, MaxBundleSize>::GetFirstNode()
-{
-    assert(m_head != m_list.end());
-    return m_list.front().m_nodes[0];
-}
+    void clear()
+    {
+        m_list.clear();
+    }
+};
 
-template <typename T, std::size_t MaxBundleSize>
-void NodeBundle<T, MaxBundleSize>::Clear()
-{
-    m_list.clear();
-}
 
 class Vertex
 {
@@ -131,11 +116,14 @@ public:
 class KdTreeInterface
 {
 public:
-    virtual const Vertex& GetPosition(uint32_t index) const = 0;
+    virtual const Vertex& getPosition(uint32_t index) const = 0;
 };
 
 class KdTreeNode;
 
+// This is a small struct used internally when doing a search of 
+//the KdTree. It returns which node and what distance matched the
+// search criteria
 class KdTreeFindNode
 {
 public:
@@ -153,7 +141,7 @@ public:
     {
     }
 
-    void Add(KdTreeNode& node,
+    void add(KdTreeNode& node,
         Axes dim,
         const KdTreeInterface& tree)
     {
@@ -175,37 +163,37 @@ public:
             break;
         }
 
-        const Vertex& nodePosition = tree.GetPosition(node.m_index);
-        const Vertex& position = tree.GetPosition(m_index);
+        const Vertex& nodePosition = tree.getPosition(node.m_index);
+        const Vertex& position = tree.getPosition(m_index);
         if (nodePosition.mPoint[idx] <= position.mPoint[idx])
         {
             if (m_left)
-                m_left->Add(node, axis, tree);
+                m_left->add(node, axis, tree);
             else
                 m_left = &node;
         }
         else
         {
             if (m_right)
-                m_right->Add(node, axis, tree);
+                m_right->add(node, axis, tree);
             else
                 m_right = &node;
         }
     }
 
-    uint32_t GetIndex() const
+    uint32_t getIndex() const
     {
         return m_index;
     }
 
-    void Search(Axes axis,
+    void search(Axes axis,
         const Vertex& pos,
         float &radius,
         KdTreeFindNode &found,
         const KdTreeInterface& iface)
     {
         // Get the position of this node
-        const Vertex position = iface.GetPosition(m_index);
+        const Vertex position = iface.getPosition(m_index);
         // Compute the difference between this node position and the point
         // we are searching against
         const Vertex d = pos - position;
@@ -264,12 +252,12 @@ public:
 
         if (search1)
         {
-            search1->Search(axis, pos, radius, found, iface);
+            search1->search(axis, pos, radius, found, iface);
         }
 
         if (search2)
         {
-            search2->Search(axis, pos, radius, found, iface);
+            search2->search(axis, pos, radius, found, iface);
         }
     }
 
@@ -287,13 +275,13 @@ class KdTree : public KdTreeInterface
 public:
     KdTree() = default;
 
-    virtual const Vertex& GetPosition(uint32_t index) const
+    virtual const Vertex& getPosition(uint32_t index) const
     {
         assert(index < m_vertices.size());
         return m_vertices[index];
     }
 
-    uint32_t Search(const Vertex& pos,
+    uint32_t search(const Vertex& pos,
                     float _radius,
                     KdTreeFindNode &found) const
     {
@@ -306,25 +294,25 @@ public:
         // and the root node is less than the search radius provided then
         // we shrink the search radius down since the root node is already
         // the 'nearest' relative to the search criteria given
-        const Vertex &rootPos = GetPosition(m_root->GetIndex());
+        const Vertex &rootPos = getPosition(m_root->getIndex());
         float d2 = rootPos.getDistanceSquared(pos);
         float pdist = sqrtf(d2);
         if (pdist < radius)
         {
             radius = pdist;
         }
-        m_root->Search(X_AXIS, pos, radius, found, *this);
+        m_root->search(X_AXIS, pos, radius, found, *this);
         return count;
     }
 
-    uint32_t Add(const Vertex& v)
+    uint32_t add(const Vertex& v)
     {
         uint32_t ret = uint32_t(m_vertices.size());
         m_vertices.emplace_back(v);
-        KdTreeNode& node = GetNewNode(ret);
+        KdTreeNode& node = getNewNode(ret);
         if (m_root)
         {
-            m_root->Add(node,
+            m_root->add(node,
                 X_AXIS,
                 *this);
         }
@@ -335,14 +323,14 @@ public:
         return ret;
     }
 
-    KdTreeNode& GetNewNode(uint32_t index)
+    KdTreeNode& getNewNode(uint32_t index)
     {
-        KdTreeNode& node = m_bundle.GetNextNode();
+        KdTreeNode& node = m_bundle.getNextNode();
         node = KdTreeNode(index);
         return node;
     }
 
-    uint32_t GetNearest(const Vertex& pos,
+    uint32_t getNearest(const Vertex& pos,
                         float radius,
                         bool& _found) const // returns the nearest possible neighbor's index.
     {
@@ -352,27 +340,27 @@ public:
         KdTreeFindNode found;
         found.m_distance = radius * radius;
         found.m_node = nullptr;
-        uint32_t count = Search(pos, radius, found);
+        uint32_t count = search(pos, radius, found);
         if (found.m_node)
         {
             KdTreeNode* node = found.m_node;
-            ret = node->GetIndex();
+            ret = node->getIndex();
             _found = true;
         }
         return ret;
     }
 
-    const std::vector<Vertex>& GetVertices() const
+    const std::vector<Vertex>& getVertices() const
     {
         return m_vertices;
     }
 
-    std::vector<Vertex>&& TakeVertices()
+    std::vector<Vertex>&& takeVertices()
     {
         return std::move(m_vertices);
     }
 
-    uint32_t GetVCount() const
+    uint32_t getVCount() const
     {
         return uint32_t(m_vertices.size());
     }
