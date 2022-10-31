@@ -10,8 +10,6 @@ enum Axes
     Z_AXIS = 2
 };
 
-
-
 /*
  * To minimize memory allocations while maintaining pointer stability.
  * Used in KdTreeNode and ConvexHull, as both use tree data structures that rely on pointer stability
@@ -151,19 +149,129 @@ class KdTreeNode
 {
 public:
     KdTreeNode() = default;
-    KdTreeNode(uint32_t index);
+    KdTreeNode(uint32_t index) : m_index(index)
+    {
+    }
 
     void Add(KdTreeNode& node,
         Axes dim,
-        const KdTreeInterface& iface);
+        const KdTreeInterface& tree)
+    {
+        Axes axis = X_AXIS;
+        uint32_t idx = 0;
+        switch (dim)
+        {
+        case X_AXIS:
+            idx = 0;
+            axis = Y_AXIS;
+            break;
+        case Y_AXIS:
+            idx = 1;
+            axis = Z_AXIS;
+            break;
+        case Z_AXIS:
+            idx = 2;
+            axis = X_AXIS;
+            break;
+        }
 
-    uint32_t GetIndex() const;
+        const Vertex& nodePosition = tree.GetPosition(node.m_index);
+        const Vertex& position = tree.GetPosition(m_index);
+        if (nodePosition.mPoint[idx] <= position.mPoint[idx])
+        {
+            if (m_left)
+                m_left->Add(node, axis, tree);
+            else
+                m_left = &node;
+        }
+        else
+        {
+            if (m_right)
+                m_right->Add(node, axis, tree);
+            else
+                m_right = &node;
+        }
+    }
+
+    uint32_t GetIndex() const
+    {
+        return m_index;
+    }
 
     void Search(Axes axis,
         const Vertex& pos,
         float &radius,
         KdTreeFindNode &found,
-        const KdTreeInterface& iface);
+        const KdTreeInterface& iface)
+    {
+        // Get the position of this node
+        const Vertex position = iface.GetPosition(m_index);
+        // Compute the difference between this node position and the point
+        // we are searching against
+        const Vertex d = pos - position;
+
+        KdTreeNode* search1 = 0;
+        KdTreeNode* search2 = 0;
+
+        // Compute the array index (X,Y,Z) and increment
+        // the axis to the next search plane
+        uint32_t idx = 0;
+        switch (axis)
+        {
+        case X_AXIS:
+            idx = 0;
+            axis = Y_AXIS;
+            break;
+        case Y_AXIS:
+            idx = 1;
+            axis = Z_AXIS;
+            break;
+        case Z_AXIS:
+            idx = 2;
+            axis = X_AXIS;
+            break;
+        }
+
+        if (d.mPoint[idx] <= 0) // JWR  if we are to the left
+        {
+            search1 = m_left; // JWR  then search to the left
+            if (-d.mPoint[idx] < radius) // JWR  if distance to the right is less than our search radius, continue on the right
+                                // as well.
+                search2 = m_right;
+        }
+        else
+        {
+            search1 = m_right; // JWR  ok, we go down the left tree
+            if (d.mPoint[idx] < radius) // JWR  if the distance from the right is less than our search radius
+                search2 = m_left;
+        }
+
+        float r2 = radius * radius;
+        float m = d.getNormSquared();
+        // if the distance between this point and the radius match
+        if (m < r2)
+        {
+            // If this is less than the current closest point found
+            // this becomes the new closest point found
+            if (m < found.m_distance)
+            {
+                found.m_node = this;   // Remember the node
+                found.m_distance = m;  // Remember the distance to this node
+                radius = sqrtf(m);
+            }
+        }
+
+
+        if (search1)
+        {
+            search1->Search(axis, pos, radius, found, iface);
+        }
+
+        if (search2)
+        {
+            search2->Search(axis, pos, radius, found, iface);
+        }
+    }
 
 private:
     uint32_t m_index = 0;
@@ -171,132 +279,6 @@ private:
     KdTreeNode* m_right = nullptr;
 };
 
-
-
-KdTreeNode::KdTreeNode(uint32_t index)
-    : m_index(index)
-{
-}
-
-void KdTreeNode::Add(KdTreeNode& node,
-    Axes dim,
-    const KdTreeInterface& tree)
-{
-    Axes axis = X_AXIS;
-    uint32_t idx = 0;
-    switch (dim)
-    {
-    case X_AXIS:
-        idx = 0;
-        axis = Y_AXIS;
-        break;
-    case Y_AXIS:
-        idx = 1;
-        axis = Z_AXIS;
-        break;
-    case Z_AXIS:
-        idx = 2;
-        axis = X_AXIS;
-        break;
-    }
-
-    const Vertex& nodePosition = tree.GetPosition(node.m_index);
-    const Vertex& position = tree.GetPosition(m_index);
-    if (nodePosition.mPoint[idx] <= position.mPoint[idx])
-    {
-        if (m_left)
-            m_left->Add(node, axis, tree);
-        else
-            m_left = &node;
-    }
-    else
-    {
-        if (m_right)
-            m_right->Add(node, axis, tree);
-        else
-            m_right = &node;
-    }
-}
-
-uint32_t KdTreeNode::GetIndex() const
-{
-    return m_index;
-}
-
-void KdTreeNode::Search(Axes axis,
-    const Vertex& pos,
-    float &radius,
-    KdTreeFindNode &found,
-    const KdTreeInterface& iface)
-{
-    // Get the position of this node
-    const Vertex position = iface.GetPosition(m_index);
-    // Compute the difference between this node position and the point
-    // we are searching against
-    const Vertex d = pos - position;
-
-    KdTreeNode* search1 = 0;
-    KdTreeNode* search2 = 0;
-
-    // Compute the array index (X,Y,Z) and increment
-    // the axis to the next search plane
-    uint32_t idx = 0;
-    switch (axis)
-    {
-    case X_AXIS:
-        idx = 0;
-        axis = Y_AXIS;
-        break;
-    case Y_AXIS:
-        idx = 1;
-        axis = Z_AXIS;
-        break;
-    case Z_AXIS:
-        idx = 2;
-        axis = X_AXIS;
-        break;
-    }
-
-    if (d.mPoint[idx] <= 0) // JWR  if we are to the left
-    {
-        search1 = m_left; // JWR  then search to the left
-        if (-d.mPoint[idx] < radius) // JWR  if distance to the right is less than our search radius, continue on the right
-                            // as well.
-            search2 = m_right;
-    }
-    else
-    {
-        search1 = m_right; // JWR  ok, we go down the left tree
-        if (d.mPoint[idx] < radius) // JWR  if the distance from the right is less than our search radius
-            search2 = m_left;
-    }
-
-    float r2 = radius * radius;
-    float m = d.getNormSquared();
-    // if the distance between this point and the radius match
-    if (m < r2)
-    {
-        // If this is less than the current closest point found
-        // this becomes the new closest point found
-        if (m < found.m_distance)
-        {
-            found.m_node = this;   // Remember the node
-            found.m_distance = m;  // Remember the distance to this node
-            radius = sqrtf(m);
-        }
-    }
-
-
-    if (search1)
-    {
-        search1->Search(axis, pos, radius, found, iface);
-    }
-
-    if (search2)
-    {
-        search2->Search(axis, pos, radius, found, iface);
-    }
-}
 
 
 
