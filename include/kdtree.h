@@ -22,12 +22,12 @@ class NodeBundle
 {
     struct NodeStorage 
     {
-        bool isFull() const
+        inline bool isFull() const
         {
             return m_index == MaxBundleSize;
         }
 
-        T& getNextNode()
+        inline T& getNextNode()
         {
             assert(m_index < MaxBundleSize);
             T& ret = m_nodes[m_index];
@@ -43,7 +43,7 @@ class NodeBundle
     typename std::list<NodeStorage>::iterator m_head{ m_list.end() };
 
 public:
-    T& getNextNode()
+    inline T& getNextNode()
     {
         /*
          * || short circuits, so doesn't dereference if m_bundle == m_bundleHead.end()
@@ -55,13 +55,13 @@ public:
         return m_head->getNextNode();
     }
 
-    T& getFirstNode()
+    inline T& getFirstNode()
     {
         assert(m_head != m_list.end());
         return m_list.front().m_nodes[0];
     }
 
-    void clear()
+    inline void clear()
     {
         m_list.clear();
     }
@@ -96,12 +96,12 @@ public:
                        mPoint[2] - v.mPoint[2],mId);
     }
 
-    Type getNormSquared(void) const
+    inline Type getNormSquared(void) const
     {
         return mPoint[0]*mPoint[0] + mPoint[1]*mPoint[1] + mPoint[2] *mPoint[2];
     }
 
-    Type getDistanceSquared(const Vertex &v) const
+    inline Type getDistanceSquared(const Vertex &v) const
     {
         Type dx = v.mPoint[0] - mPoint[0];
         Type dy = v.mPoint[1] - mPoint[1];
@@ -129,8 +129,9 @@ template <class Type> class KdTreeFindNode
 public:
     KdTreeFindNode() = default;
 
-    KdTreeNode<Type>* m_node{ nullptr };
-    Type m_distance{ 0.0 };
+    KdTreeNode<Type>* mNode{ nullptr };
+    Type mDistanceSquared{ 0.0 };
+    uint32_t    mTestCount{0};
 };
 
 template <class Type> class KdTreeNode
@@ -141,7 +142,7 @@ public:
     {
     }
 
-    void add(KdTreeNode<Type>& node,
+    inline void add(KdTreeNode<Type>& node,
         Axes dim,
         const KdTreeInterface<Type>& tree)
     {
@@ -181,19 +182,19 @@ public:
         }
     }
 
-    uint32_t getIndex() const
+    inline uint32_t getIndex() const
     {
         return m_index;
     }
 
-    void search(Axes axis,
+    inline void search(Axes axis,
         const Vertex<Type>& pos,
         Type &radius,
         KdTreeFindNode<Type> &found,
         const KdTreeInterface<Type>& iface)
     {
         // If we have found something with a distance of zero we can stop searching
-        if ( found.m_node && found.m_distance == 0 )
+        if ( found.mNode && found.mDistanceSquared == 0 )
         {
             return;
         }
@@ -238,21 +239,21 @@ public:
             if (d.mPoint[idx] < radius) // JWR  if the distance from the right is less than our search radius
                 search2 = m_left;
         }
-
+        found.mTestCount++;
         Type r2 = radius * radius;
-        Type m = d.getNormSquared();
+        Type m = position.getDistanceSquared(pos);
         // if the distance between this point and the radius match
         if (m < r2)
         {
             // If this is less than the current closest point found
             // this becomes the new closest point found
-            if (m < found.m_distance)
+            if (m < found.mDistanceSquared)
             {
-                found.m_node = this;   // Remember the node
-                found.m_distance = m;  // Remember the distance to this node
+                found.mNode = this;   // Remember the node
+                found.mDistanceSquared = m;  // Remember the distance to this node
                 radius = (Type)sqrt(m);
                 // If we have found something with a distance of zero we can stop searching
-                if (found.m_node && found.m_distance == 0)
+                if (found.mNode && found.mDistanceSquared == 0)
                 {
                     search1 = nullptr;
                     search2 = nullptr;
@@ -299,9 +300,11 @@ public:
     // The result position and index is stored in 'result'.
     Type findNearest(const Vertex<Type>& pos,
                     Type _radius,
+                    uint32_t &searchCount,
                     Vertex<Type> &result) const
     {
         Type ret = -1;
+        searchCount = 0;
         if (!m_root)
             return ret;
         Type radius = _radius;
@@ -316,19 +319,20 @@ public:
         if (pdist <= radius)
         {
             radius = pdist;
-            found.m_distance = pdist;
-            found.m_node = m_root;
+            found.mDistanceSquared = radius*radius;
+            found.mNode = m_root;
         }
         m_root->search(X_AXIS, pos, radius, found, *this);
-        if ( found.m_node )
+        if ( found.mNode )
         {
-            ret = found.m_distance;
-            result = getPosition(found.m_node->getIndex());
+            ret = (Type) sqrt(found.mDistanceSquared);
+            result = getPosition(found.mNode->getIndex());
+            searchCount = found.mTestCount;
         }
         return ret;
     }
 
-    uint32_t add(const Vertex<Type>& v)
+    inline uint32_t add(const Vertex<Type>& v)
     {
         uint32_t ret = uint32_t(m_vertices.size());
         m_vertices.emplace_back(v);
@@ -346,24 +350,24 @@ public:
         return ret;
     }
 
-    KdTreeNode<Type>& getNewNode(uint32_t index)
+    inline KdTreeNode<Type>& getNewNode(uint32_t index)
     {
         KdTreeNode<Type>& node = m_bundle.getNextNode();
         node = KdTreeNode<Type>(index);
         return node;
     }
 
-    const std::vector<Vertex<Type>>& getVertices() const
+    inline const std::vector<Vertex<Type>>& getVertices() const
     {
         return m_vertices;
     }
 
-    std::vector<Vertex<Type>>&& takeVertices()
+    inline std::vector<Vertex<Type>>&& takeVertices()
     {
         return std::move(m_vertices);
     }
 
-    uint32_t getVCount() const
+    inline uint32_t getVCount() const
     {
         return uint32_t(m_vertices.size());
     }

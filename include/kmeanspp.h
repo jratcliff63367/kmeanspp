@@ -2,6 +2,8 @@
 
 #include <stdint.h>
 
+#define USE_KDTREE 0
+
 namespace kmeans
 {
 
@@ -285,18 +287,40 @@ public:
             size_t rindex = uniform_generator(rand_engine);
             mMeans.push_back(mData[rindex]);
         }
+#if USE_KDTREE
+        kdtree::KdTree<float> kdt;
+        kdtree::Vertex<float> kv;
+        kv.mPoint[0] = mMeans[0].x;
+        kv.mPoint[1] = mMeans[0].y;
+        kv.mPoint[2] = mMeans[0].z;
+        kv.mId = 0;
+        kdt.add(kv);
+#endif
         DistanceVector distances;
         distances.resize(mData.size());
         for (uint32_t count = 1; count < mK; ++count) 
         {
             Timer t;
             // Calculate the distance to the closest mean for each data point
+#if USE_KDTREE
+            closestDistance(kdt,mMeans,mData, distances);
+#else
             closestDistance(mMeans, mData, distances);
+#endif
             mTimeClosestDistances+=t.getElapsedSeconds();
             // Pick a random point weighted by the distance from existing means
             // TODO: This might convert floating point weights to ints, distorting the distribution for small weights
             std::discrete_distribution<size_t> generator(distances.begin(), distances.end());
+            uint32_t index = (uint32_t)mMeans.size();
             mMeans.push_back(mData[generator(rand_engine)]);
+#if USE_KDTREE
+            kdtree::Vertex<float> kv;
+            kv.mPoint[0] = mMeans[index].x;
+            kv.mPoint[1] = mMeans[index].y;
+            kv.mPoint[2] = mMeans[index].z;
+            kv.mId = index;
+            kdt.add(kv);
+#endif
             mTimeRandomSampling+=t.getElapsedSeconds();
         }
     }
@@ -319,6 +343,47 @@ public:
             index++;
         }
     }
+
+    void closestDistance(kdtree::KdTree<float> &kdt, 
+                         const Point3Vector &means,
+                         const Point3Vector &data, 
+                         DistanceVector &distances)
+    {
+        uint32_t index = 0;
+        for (auto& d : data)
+        {
+            kdtree::Vertex<float> v,r;
+            v.mPoint[0] = d.x;
+            v.mPoint[1] = d.y;
+            v.mPoint[2] = d.z;
+            uint32_t searchCount=0;
+            float closest = kdt.findNearest(v,FLT_MAX,searchCount,r);
+            distances[index] = closest;
+#if 0
+            {
+                float fclosest = FLT_MAX;
+                uint32_t nearIndex = 0;
+                uint32_t count = 0;
+                for (auto& m : means)
+                {
+                    float distance = d.distanceSquared(m);
+                    if (distance < fclosest)
+                    {
+                        fclosest = distance;
+                        nearIndex = count;
+                    }
+                    count++;
+                }
+                if  ( means.size() == 100 )
+                {
+                    printf("Closest[%d]:%0.9f Fclosest[%d]:%0.9f SearchCount[%d]\n",r.mId,closest,nearIndex,sqrtf(fclosest), searchCount);
+                }
+            }
+#endif
+            index++;
+        }
+    }
+
 
     void calculateClusters(void)
     {
