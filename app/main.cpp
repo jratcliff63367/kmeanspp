@@ -23,17 +23,17 @@ int main(int argc,const char **argv)
     }
 
     {
-        kdtree::KdTree k;
+        kdtree::KdTree<float> k;
         for (uint32_t i=0; i<pointCount; i++)
         {
-            kdtree::Vertex v;
+            kdtree::Vertex<float> v;
             v.mPoint[0] = points[i*3+0];
             v.mPoint[1] = points[i*3+1];
             v.mPoint[2] = points[i*3+2];
             v.mId = i;
             k.add(v);
         }
-        kdtree::Vertex f;
+        kdtree::Vertex<float> f;
 
         for (uint32_t i = 0; i < pointCount; i++)
         {
@@ -42,7 +42,7 @@ int main(int argc,const char **argv)
             f.mPoint[2] = points[i * 3 + 2];
             f.mPoint[0]+=0.01f;
             f.mId = i;
-            kdtree::Vertex found;
+            kdtree::Vertex<float> found;
             float d = k.search(f, FLT_MAX, found);
             assert( found.mId == i );
         }

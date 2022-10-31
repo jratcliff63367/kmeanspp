@@ -68,7 +68,7 @@ public:
 };
 
 
-class Vertex
+template <class Type> class Vertex
 {
 public:
     Vertex(void)
@@ -81,7 +81,7 @@ public:
         mPoint[2] = v.mPoint[2];
         mId = v.mId;
     }
-    Vertex(float x,float y,float z,uint32_t id)
+    Vertex(Type x,Type y,Type z,uint32_t id)
     {
         mPoint[0] = x;
         mPoint[1] = y;
@@ -96,54 +96,54 @@ public:
                        mPoint[2] - v.mPoint[2],mId);
     }
 
-    float getNormSquared(void) const
+    Type getNormSquared(void) const
     {
         return mPoint[0]*mPoint[0] + mPoint[1]*mPoint[1] + mPoint[2] *mPoint[2];
     }
 
-    float getDistanceSquared(const Vertex &v) const
+    Type getDistanceSquared(const Vertex &v) const
     {
-        float dx = v.mPoint[0] - mPoint[0];
-        float dy = v.mPoint[1] - mPoint[1];
-        float dz = v.mPoint[2] - mPoint[2];
+        Type dx = v.mPoint[0] - mPoint[0];
+        Type dy = v.mPoint[1] - mPoint[1];
+        Type dz = v.mPoint[2] - mPoint[2];
         return dx*dx + dy*dy + dz*dz;
     }
 
-    float   mPoint[3];
+    Type   mPoint[3];
     uint32_t mId;
 };
 
-class KdTreeInterface
+template <class Type>class KdTreeInterface
 {
 public:
-    virtual const Vertex& getPosition(uint32_t index) const = 0;
+    virtual const Vertex<Type>& getPosition(uint32_t index) const = 0;
 };
 
-class KdTreeNode;
+template <class Type> class KdTreeNode;
 
 // This is a small struct used internally when doing a search of 
 //the KdTree. It returns which node and what distance matched the
 // search criteria
-class KdTreeFindNode
+template <class Type> class KdTreeFindNode
 {
 public:
     KdTreeFindNode() = default;
 
-    KdTreeNode* m_node{ nullptr };
-    float m_distance{ 0.0 };
+    KdTreeNode<Type>* m_node{ nullptr };
+    Type m_distance{ 0.0 };
 };
 
-class KdTreeNode
+template <class Type> class KdTreeNode
 {
 public:
-    KdTreeNode() = default;
-    KdTreeNode(uint32_t index) : m_index(index)
+    KdTreeNode<Type>() = default;
+    KdTreeNode<Type>(uint32_t index) : m_index(index)
     {
     }
 
-    void add(KdTreeNode& node,
+    void add(KdTreeNode<Type>& node,
         Axes dim,
-        const KdTreeInterface& tree)
+        const KdTreeInterface<Type>& tree)
     {
         Axes axis = X_AXIS;
         uint32_t idx = 0;
@@ -163,8 +163,8 @@ public:
             break;
         }
 
-        const Vertex& nodePosition = tree.getPosition(node.m_index);
-        const Vertex& position = tree.getPosition(m_index);
+        const Vertex<Type>& nodePosition = tree.getPosition(node.m_index);
+        const Vertex<Type>& position = tree.getPosition(m_index);
         if (nodePosition.mPoint[idx] <= position.mPoint[idx])
         {
             if (m_left)
@@ -187,10 +187,10 @@ public:
     }
 
     void search(Axes axis,
-        const Vertex& pos,
-        float &radius,
-        KdTreeFindNode &found,
-        const KdTreeInterface& iface)
+        const Vertex<Type>& pos,
+        Type &radius,
+        KdTreeFindNode<Type> &found,
+        const KdTreeInterface<Type>& iface)
     {
         // If we have found something with a distance of zero we can stop searching
         if ( found.m_node && found.m_distance == 0 )
@@ -198,13 +198,13 @@ public:
             return;
         }
         // Get the position of this node
-        const Vertex position = iface.getPosition(m_index);
+        const Vertex<Type> position = iface.getPosition(m_index);
         // Compute the difference between this node position and the point
         // we are searching against
-        const Vertex d = pos - position;
+        const Vertex<Type> d = pos - position;
 
-        KdTreeNode* search1 = 0;
-        KdTreeNode* search2 = 0;
+        KdTreeNode<Type>* search1 = 0;
+        KdTreeNode<Type>* search2 = 0;
 
         // Compute the array index (X,Y,Z) and increment
         // the axis to the next search plane
@@ -239,8 +239,8 @@ public:
                 search2 = m_left;
         }
 
-        float r2 = radius * radius;
-        float m = d.getNormSquared();
+        Type r2 = radius * radius;
+        Type m = d.getNormSquared();
         // if the distance between this point and the radius match
         if (m < r2)
         {
@@ -250,7 +250,7 @@ public:
             {
                 found.m_node = this;   // Remember the node
                 found.m_distance = m;  // Remember the distance to this node
-                radius = sqrtf(m);
+                radius = (Type)sqrt(m);
                 // If we have found something with a distance of zero we can stop searching
                 if (found.m_node && found.m_distance == 0)
                 {
@@ -274,19 +274,19 @@ public:
 
 private:
     uint32_t m_index = 0;
-    KdTreeNode* m_left = nullptr;
-    KdTreeNode* m_right = nullptr;
+    KdTreeNode<Type>* m_left = nullptr;
+    KdTreeNode<Type>* m_right = nullptr;
 };
 
 
 
 
-class KdTree : public KdTreeInterface
+template <class Type> class KdTree : public KdTreeInterface<Type>
 {
 public:
     KdTree() = default;
 
-    virtual const Vertex& getPosition(uint32_t index) const
+    virtual const Vertex<Type>& getPosition(uint32_t index) const
     {
         assert(index < m_vertices.size());
         return m_vertices[index];
@@ -297,22 +297,22 @@ public:
     // If the value is greater than or equal to zero then that is the distance
     // between the search position and the nearest position.
     // The result position and index is stored in 'result'.
-    float search(const Vertex& pos,
-                    float _radius,
-                    Vertex &result) const
+    Type search(const Vertex<Type>& pos,
+                    Type _radius,
+                    Vertex<Type> &result) const
     {
-        float ret = -1;
+        Type ret = -1;
         if (!m_root)
             return ret;
-        float radius = _radius;
-        KdTreeFindNode found;
+        Type radius = _radius;
+        KdTreeFindNode<Type> found;
         // If the distance from the position we are searching against
         // and the root node is less than the search radius provided then
         // we shrink the search radius down since the root node is already
         // the 'nearest' relative to the search criteria given
-        const Vertex &rootPos = getPosition(m_root->getIndex());
-        float d2 = rootPos.getDistanceSquared(pos);
-        float pdist = sqrtf(d2);
+        const Vertex<Type> &rootPos = getPosition(m_root->getIndex());
+        Type d2 = rootPos.getDistanceSquared(pos);
+        Type pdist = (Type)sqrt(d2);
         if (pdist <= radius)
         {
             radius = pdist;
@@ -328,11 +328,11 @@ public:
         return ret;
     }
 
-    uint32_t add(const Vertex& v)
+    uint32_t add(const Vertex<Type>& v)
     {
         uint32_t ret = uint32_t(m_vertices.size());
         m_vertices.emplace_back(v);
-        KdTreeNode& node = getNewNode(ret);
+        KdTreeNode<Type>& node = getNewNode(ret);
         if (m_root)
         {
             m_root->add(node,
@@ -346,19 +346,19 @@ public:
         return ret;
     }
 
-    KdTreeNode& getNewNode(uint32_t index)
+    KdTreeNode<Type>& getNewNode(uint32_t index)
     {
-        KdTreeNode& node = m_bundle.getNextNode();
-        node = KdTreeNode(index);
+        KdTreeNode<Type>& node = m_bundle.getNextNode();
+        node = KdTreeNode<Type>(index);
         return node;
     }
 
-    const std::vector<Vertex>& getVertices() const
+    const std::vector<Vertex<Type>>& getVertices() const
     {
         return m_vertices;
     }
 
-    std::vector<Vertex>&& takeVertices()
+    std::vector<Vertex<Type>>&& takeVertices()
     {
         return std::move(m_vertices);
     }
@@ -369,10 +369,10 @@ public:
     }
 
 private:
-    KdTreeNode* m_root{ nullptr };
-    NodeBundle<KdTreeNode> m_bundle;
+    KdTreeNode<Type>* m_root{ nullptr };
+    NodeBundle<KdTreeNode<Type>> m_bundle;
 
-    std::vector<Vertex> m_vertices;
+    std::vector<Vertex<Type>> m_vertices;
 };
 
 
