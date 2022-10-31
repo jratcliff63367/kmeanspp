@@ -192,6 +192,11 @@ public:
         KdTreeFindNode &found,
         const KdTreeInterface& iface)
     {
+        // If we have found something with a distance of zero we can stop searching
+        if ( found.m_node && found.m_distance == 0 )
+        {
+            return;
+        }
         // Get the position of this node
         const Vertex position = iface.getPosition(m_index);
         // Compute the difference between this node position and the point
@@ -246,6 +251,12 @@ public:
                 found.m_node = this;   // Remember the node
                 found.m_distance = m;  // Remember the distance to this node
                 radius = sqrtf(m);
+                // If we have found something with a distance of zero we can stop searching
+                if (found.m_node && found.m_distance == 0)
+                {
+                    search1 = nullptr;
+                    search2 = nullptr;
+                }
             }
         }
 
@@ -281,15 +292,20 @@ public:
         return m_vertices[index];
     }
 
-    uint32_t search(const Vertex& pos,
+    // Search for the nearest position within the radius provided
+    // If the return value is -1 that means we could not find a point in range
+    // If the value is greater than or equal to zero then that is the distance
+    // between the search position and the nearest position.
+    // The result position and index is stored in 'result'.
+    float search(const Vertex& pos,
                     float _radius,
-                    KdTreeFindNode &found) const
+                    Vertex &result) const
     {
+        float ret = -1;
         if (!m_root)
-            return 0;
-        uint32_t count = 0;
+            return ret;
         float radius = _radius;
-
+        KdTreeFindNode found;
         // If the distance from the position we are searching against
         // and the root node is less than the search radius provided then
         // we shrink the search radius down since the root node is already
@@ -297,12 +313,19 @@ public:
         const Vertex &rootPos = getPosition(m_root->getIndex());
         float d2 = rootPos.getDistanceSquared(pos);
         float pdist = sqrtf(d2);
-        if (pdist < radius)
+        if (pdist <= radius)
         {
             radius = pdist;
+            found.m_distance = pdist;
+            found.m_node = m_root;
         }
         m_root->search(X_AXIS, pos, radius, found, *this);
-        return count;
+        if ( found.m_node )
+        {
+            ret = found.m_distance;
+            result = getPosition(found.m_node->getIndex());
+        }
+        return ret;
     }
 
     uint32_t add(const Vertex& v)
@@ -328,26 +351,6 @@ public:
         KdTreeNode& node = m_bundle.getNextNode();
         node = KdTreeNode(index);
         return node;
-    }
-
-    uint32_t getNearest(const Vertex& pos,
-                        float radius,
-                        bool& _found) const // returns the nearest possible neighbor's index.
-    {
-        uint32_t ret = 0;
-
-        _found = false;
-        KdTreeFindNode found;
-        found.m_distance = radius * radius;
-        found.m_node = nullptr;
-        uint32_t count = search(pos, radius, found);
-        if (found.m_node)
-        {
-            KdTreeNode* node = found.m_node;
-            ret = node->getIndex();
-            _found = true;
-        }
-        return ret;
     }
 
     const std::vector<Vertex>& getVertices() const
