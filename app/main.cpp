@@ -4,7 +4,7 @@
 
 #include "ScopedTime.h"
 #define ENABLE_KMEANS_IMPLEMENTATION 1
-#include "kmeans.h"
+#include "kmeanspp.h"
 
 
 int main(int argc,const char **argv)

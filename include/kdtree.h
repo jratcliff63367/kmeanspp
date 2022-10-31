@@ -3,8 +3,6 @@
 namespace kdtree
 {
 
-class KdTreeNode;
-
 enum Axes
 {
     X_AXIS = 0,
@@ -12,14 +10,7 @@ enum Axes
     Z_AXIS = 2
 };
 
-class KdTreeFindNode
-{
-public:
-    KdTreeFindNode() = default;
 
-    KdTreeNode* m_node{ nullptr };
-    float m_distance{ 0.0 };
-};
 
 /*
  * To minimize memory allocations while maintaining pointer stability.
@@ -139,35 +130,21 @@ public:
     uint32_t mId;
 };
 
-class KdTree
+class KdTreeInterface
 {
 public:
-    KdTree() = default;
+    virtual const Vertex& GetPosition(uint32_t index) const = 0;
+};
 
-    const Vertex& GetPosition(uint32_t index) const;
+class KdTreeNode;
 
-    uint32_t Search(const Vertex& pos,
-                    float radius,
-                    KdTreeFindNode &found) const;
+class KdTreeFindNode
+{
+public:
+    KdTreeFindNode() = default;
 
-    uint32_t Add(const Vertex& v);
-
-    KdTreeNode& GetNewNode(uint32_t index);
-
-    uint32_t GetNearest(const Vertex& pos,
-                        float radius,
-                        bool& _found) const; // returns the nearest possible neighbor's index.
-
-    const std::vector<Vertex>& GetVertices() const;
-    std::vector<Vertex>&& TakeVertices();
-
-    uint32_t GetVCount() const;
-
-private:
-    KdTreeNode* m_root{ nullptr };
-    NodeBundle<KdTreeNode> m_bundle;
-
-    std::vector<Vertex> m_vertices;
+    KdTreeNode* m_node{ nullptr };
+    float m_distance{ 0.0 };
 };
 
 class KdTreeNode
@@ -177,16 +154,16 @@ public:
     KdTreeNode(uint32_t index);
 
     void Add(KdTreeNode& node,
-             Axes dim,
-             const KdTree& iface);
+        Axes dim,
+        const KdTreeInterface& iface);
 
     uint32_t GetIndex() const;
 
     void Search(Axes axis,
-                const Vertex& pos,
-                float &radius,
-                KdTreeFindNode &found,
-                const KdTree& iface);
+        const Vertex& pos,
+        float &radius,
+        KdTreeFindNode &found,
+        const KdTreeInterface& iface);
 
 private:
     uint32_t m_index = 0;
@@ -194,95 +171,7 @@ private:
     KdTreeNode* m_right = nullptr;
 };
 
-const Vertex& KdTree::GetPosition(uint32_t index) const
-{
-    assert(index < m_vertices.size());
-    return m_vertices[index];
-}
 
-uint32_t KdTree::Search(const Vertex& pos,
-                        float _radius,
-                        KdTreeFindNode &found) const
-{
-    if (!m_root)
-        return 0;
-    uint32_t count = 0;
-    float radius = _radius;
-
-    // If the distance from the position we are searching against
-    // and the root node is less than the search radius provided then
-    // we shrink the search radius down since the root node is already
-    // the 'nearest' relative to the search criteria given
-    const Vertex &rootPos = GetPosition(m_root->GetIndex());
-    float d2 = rootPos.getDistanceSquared(pos);
-    float pdist = sqrtf(d2);
-    if ( pdist < radius )
-    {
-        radius = pdist;
-    }
-    m_root->Search(X_AXIS, pos, radius, found, *this);
-    return count;
-}
-
-uint32_t KdTree::Add(const Vertex& v)
-{
-    uint32_t ret = uint32_t(m_vertices.size());
-    m_vertices.emplace_back(v);
-    KdTreeNode& node = GetNewNode(ret);
-    if (m_root)
-    {
-        m_root->Add(node,
-                    X_AXIS,
-                    *this);
-    }
-    else
-    {
-        m_root = &node;
-    }
-    return ret;
-}
-
-KdTreeNode& KdTree::GetNewNode(uint32_t index)
-{
-    KdTreeNode& node = m_bundle.GetNextNode();
-    node = KdTreeNode(index);
-    return node;
-}
-
-uint32_t KdTree::GetNearest(const Vertex& pos,
-                            float radius,
-                            bool& _found) const // returns the nearest possible neighbor's index.
-{
-    uint32_t ret = 0;
-
-    _found = false;
-    KdTreeFindNode found;
-    found.m_distance = radius*radius;
-    found.m_node = nullptr;
-    uint32_t count = Search(pos, radius, found);
-    if ( found.m_node)
-    {
-        KdTreeNode* node = found.m_node;
-        ret = node->GetIndex();
-        _found = true;
-    }
-    return ret;
-}
-
-const std::vector<Vertex>& KdTree::GetVertices() const
-{
-    return m_vertices;
-}
-
-std::vector<Vertex>&& KdTree::TakeVertices()
-{
-    return std::move(m_vertices);
-}
-
-uint32_t KdTree::GetVCount() const
-{
-    return uint32_t(m_vertices.size());
-}
 
 KdTreeNode::KdTreeNode(uint32_t index)
     : m_index(index)
@@ -290,8 +179,8 @@ KdTreeNode::KdTreeNode(uint32_t index)
 }
 
 void KdTreeNode::Add(KdTreeNode& node,
-                     Axes dim,
-                     const KdTree& tree)
+    Axes dim,
+    const KdTreeInterface& tree)
 {
     Axes axis = X_AXIS;
     uint32_t idx = 0;
@@ -335,10 +224,10 @@ uint32_t KdTreeNode::GetIndex() const
 }
 
 void KdTreeNode::Search(Axes axis,
-                        const Vertex& pos,
-                        float &radius,
-                        KdTreeFindNode &found,
-                        const KdTree& iface)
+    const Vertex& pos,
+    float &radius,
+    KdTreeFindNode &found,
+    const KdTreeInterface& iface)
 {
     // Get the position of this node
     const Vertex position = iface.GetPosition(m_index);
@@ -354,18 +243,18 @@ void KdTreeNode::Search(Axes axis,
     uint32_t idx = 0;
     switch (axis)
     {
-        case X_AXIS:
-            idx = 0;
-            axis = Y_AXIS;
-            break;
-        case Y_AXIS:
-            idx = 1;
-            axis = Z_AXIS;
-            break;
-        case Z_AXIS:
-            idx = 2;
-            axis = X_AXIS;
-            break;
+    case X_AXIS:
+        idx = 0;
+        axis = Y_AXIS;
+        break;
+    case Y_AXIS:
+        idx = 1;
+        axis = Z_AXIS;
+        break;
+    case Z_AXIS:
+        idx = 2;
+        axis = X_AXIS;
+        break;
     }
 
     if (d.mPoint[idx] <= 0) // JWR  if we are to the left
@@ -408,5 +297,110 @@ void KdTreeNode::Search(Axes axis,
         search2->Search(axis, pos, radius, found, iface);
     }
 }
+
+
+
+class KdTree : public KdTreeInterface
+{
+public:
+    KdTree() = default;
+
+    virtual const Vertex& GetPosition(uint32_t index) const
+    {
+        assert(index < m_vertices.size());
+        return m_vertices[index];
+    }
+
+    uint32_t Search(const Vertex& pos,
+                    float _radius,
+                    KdTreeFindNode &found) const
+    {
+        if (!m_root)
+            return 0;
+        uint32_t count = 0;
+        float radius = _radius;
+
+        // If the distance from the position we are searching against
+        // and the root node is less than the search radius provided then
+        // we shrink the search radius down since the root node is already
+        // the 'nearest' relative to the search criteria given
+        const Vertex &rootPos = GetPosition(m_root->GetIndex());
+        float d2 = rootPos.getDistanceSquared(pos);
+        float pdist = sqrtf(d2);
+        if (pdist < radius)
+        {
+            radius = pdist;
+        }
+        m_root->Search(X_AXIS, pos, radius, found, *this);
+        return count;
+    }
+
+    uint32_t Add(const Vertex& v)
+    {
+        uint32_t ret = uint32_t(m_vertices.size());
+        m_vertices.emplace_back(v);
+        KdTreeNode& node = GetNewNode(ret);
+        if (m_root)
+        {
+            m_root->Add(node,
+                X_AXIS,
+                *this);
+        }
+        else
+        {
+            m_root = &node;
+        }
+        return ret;
+    }
+
+    KdTreeNode& GetNewNode(uint32_t index)
+    {
+        KdTreeNode& node = m_bundle.GetNextNode();
+        node = KdTreeNode(index);
+        return node;
+    }
+
+    uint32_t GetNearest(const Vertex& pos,
+                        float radius,
+                        bool& _found) const // returns the nearest possible neighbor's index.
+    {
+        uint32_t ret = 0;
+
+        _found = false;
+        KdTreeFindNode found;
+        found.m_distance = radius * radius;
+        found.m_node = nullptr;
+        uint32_t count = Search(pos, radius, found);
+        if (found.m_node)
+        {
+            KdTreeNode* node = found.m_node;
+            ret = node->GetIndex();
+            _found = true;
+        }
+        return ret;
+    }
+
+    const std::vector<Vertex>& GetVertices() const
+    {
+        return m_vertices;
+    }
+
+    std::vector<Vertex>&& TakeVertices()
+    {
+        return std::move(m_vertices);
+    }
+
+    uint32_t GetVCount() const
+    {
+        return uint32_t(m_vertices.size());
+    }
+
+private:
+    KdTreeNode* m_root{ nullptr };
+    NodeBundle<KdTreeNode> m_bundle;
+
+    std::vector<Vertex> m_vertices;
+};
+
 
 }
