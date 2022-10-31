@@ -43,7 +43,7 @@ int main(int argc,const char **argv)
             f.mPoint[0]+=0.01f;
             f.mId = i;
             kdtree::Vertex<float> found;
-            float d = k.search(f, FLT_MAX, found);
+            float d = k.findNearest(f, FLT_MAX, found);
             assert( found.mId == i );
         }
 

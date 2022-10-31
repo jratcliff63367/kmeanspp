@@ -297,7 +297,7 @@ public:
     // If the value is greater than or equal to zero then that is the distance
     // between the search position and the nearest position.
     // The result position and index is stored in 'result'.
-    Type search(const Vertex<Type>& pos,
+    Type findNearest(const Vertex<Type>& pos,
                     Type _radius,
                     Vertex<Type> &result) const
     {
