@@ -2,7 +2,7 @@
 
 #include <stdint.h>
 
-#define USE_KDTREE 0
+#define USE_KDTREE 1
 
 #if USE_KDTREE
 #include "kdtree.h"
@@ -11,17 +11,23 @@
 namespace kmeans
 {
 
+
 class Kmeans
 {
 public:
+    class Parameters
+    {
+    public:
+        const float *mPoints{nullptr};
+        uint32_t     mPointCount{0};
+        uint32_t     mMaxPoints{0}; // maximum number of output points
+        // If this is the same size as max-points then we just
+        // do a random distribution and bypass the kmeans++ computation
+        uint32_t     mMaximumPlusPlusCount{0};
+    };
     static Kmeans *create(void);
 
-    virtual const float *compute(const float *sourcePoints,
-        uint32_t pointCount,
-        uint32_t maxPoints,
-        uint32_t &resultPointCount) = 0;
-
-
+    virtual const float *compute(const Parameters &params,uint32_t &resultPointCount) = 0;
 
     virtual void release(void) = 0;
 protected:
@@ -53,6 +59,55 @@ protected:
 
 namespace kmeans
 {
+
+class RandPool
+{
+public:
+    RandPool(uint32_t size) // size of random number bool.
+    {
+        mData = new uint32_t[size];
+        mSize = size;
+        mTop = mSize;
+        for (uint32_t i = 0; i < mSize; i++)
+        {
+            mData[i] = i;
+        }
+    }
+
+    ~RandPool(void)
+    {
+        delete []mData;
+    };
+
+    // pull a number from the random number pool, will never return the
+    // same number twice until the 'deck' (pool) has been exhausted.
+    // Will set the shuffled flag to true if the deck/pool was exhausted
+    // on this call.
+    uint32_t get(bool& shuffled)
+    {
+        if (mTop == 0) // deck exhausted, shuffle deck.
+        {
+            shuffled = true;
+            mTop = mSize;
+        }
+        else
+        {
+            shuffled = false;
+        }
+        uint32_t entry = rand() % mTop;
+        mTop--;
+        uint32_t ret = mData[entry]; // swap top of pool with entry
+        mData[entry] = mData[mTop]; // returned
+        mData[mTop] = ret;
+        return ret;
+    };
+
+
+private:
+    uint32_t* mData; // random number bool.
+    uint32_t mSize; // size of random number pool.
+    uint32_t mTop; // current top of the random number pool.
+};
 
     class Timer
     {
@@ -129,35 +184,32 @@ public:
     {
     }
 
-    virtual const float *compute(const float *sourcePoints,
-        uint32_t pointCount,
-        uint32_t maxPoints,
+    virtual const float *compute(const Parameters &params,
         uint32_t &resultPointCount) final
     {
         const float *ret = nullptr;
 
-        mK = maxPoints;
+        mK = params.mMaxPoints;
         mMeans.clear();
         mMeans.reserve(mK);
         // If the number of input points is less than or equal
         // to 'K' we just return the input points directly
-        if ( pointCount <= mK )
+        if ( params.mPointCount <= mK )
         {
-            mMeans.resize(pointCount);
-            memcpy(&mMeans[0],sourcePoints,sizeof(Point3)*pointCount);
-            resultPointCount = pointCount;
+            mMeans.resize(params.mPointCount);
+            memcpy(&mMeans[0],params.mPoints,sizeof(Point3)*params.mPointCount);
+            resultPointCount = params.mPointCount;
             ret = &mMeans[0].x;
             return ret;
         }
 
-        mClusters.resize(pointCount);
-
-        mData.resize(pointCount);
-        memcpy(&mData[0],sourcePoints,sizeof(float)*3*pointCount);
+        mClusters.resize(params.mPointCount);
+        mData.resize(params.mPointCount);
+        memcpy(&mData[0],params.mPoints,sizeof(float)*3*params.mPointCount);
 
         {
             Timer t;
-            initializeClusters();
+            initializeClusters(params);
             mTimeInitializing = t.getElapsedSeconds();
         }
 
@@ -277,8 +329,48 @@ public:
         delete this;
     }
 
-    void initializeClusters(void)
+    void initializeClusters(const Parameters &params)
     {
+        uint32_t maxPlusPlusCount = params.mMaximumPlusPlusCount;
+        if ( maxPlusPlusCount < params.mMaxPoints )
+        {
+            maxPlusPlusCount = params.mMaxPoints;
+        }
+        else if ( maxPlusPlusCount > params.mPointCount )
+        {
+            maxPlusPlusCount = params.mPointCount;
+        }
+        if ( params.mMaxPoints == maxPlusPlusCount )
+        {
+            mMeans.clear();
+            mMeans.resize(maxPlusPlusCount);
+            RandPool rp(params.mPointCount);
+            for (uint32_t i=0; i<maxPlusPlusCount; i++)
+            {
+                bool shuffled;
+                uint32_t index = rp.get(shuffled);
+                const auto &p = mData[index];
+                mMeans[i] = p;
+            }
+            return;
+        }
+        uint32_t dataSize = uint32_t(mData.size());
+        Point3Vector data;
+        if ( maxPlusPlusCount != dataSize )
+        {
+            data.resize(maxPlusPlusCount);
+            RandPool rp(dataSize);
+            for (uint32_t i=0; i<maxPlusPlusCount; i++)
+            {
+                bool shuffled;
+                uint32_t index = rp.get(shuffled);
+                data[i] = mData[index];
+            }
+        }
+        else
+        {
+            data = mData;
+        }
         std::random_device rand_device;
         uint64_t seed = 0; //rand_device();
         // Using a very simple PRBS generator, parameters selected according to
@@ -286,9 +378,9 @@ public:
         std::linear_congruential_engine<uint64_t, 6364136223846793005, 1442695040888963407, UINT64_MAX> rand_engine(seed);
         // Select first mean at random from the set
         {
-            std::uniform_int_distribution<size_t> uniform_generator(0, mData.size() - 1);
+            std::uniform_int_distribution<size_t> uniform_generator(0, data.size() - 1);
             size_t rindex = uniform_generator(rand_engine);
-            mMeans.push_back(mData[rindex]);
+            mMeans.push_back(data[rindex]);
         }
 #if USE_KDTREE
         kdtree::KdTree kdt;
@@ -303,22 +395,22 @@ public:
         kdt.buildTree();
 #endif
         DistanceVector distances;
-        distances.resize(mData.size());
+        distances.resize(data.size());
         for (uint32_t count = 1; count < mK; ++count) 
         {
             Timer t;
             // Calculate the distance to the closest mean for each data point
 #if USE_KDTREE
-            closestDistance(kdt, mData, distances);
+            closestDistance(kdt, data, distances);
 #else
-            closestDistance(mMeans, mData, distances);
+            closestDistance(mMeans, data, distances);
 #endif
             mTimeClosestDistances+=t.getElapsedSeconds();
             // Pick a random point weighted by the distance from existing means
             // TODO: This might convert floating point weights to ints, distorting the distribution for small weights
             std::discrete_distribution<size_t> generator(distances.begin(), distances.end());
             uint32_t index = (uint32_t)mMeans.size();
-            mMeans.push_back(mData[generator(rand_engine)]);
+            mMeans.push_back(data[generator(rand_engine)]);
 #if USE_KDTREE
             kdtree::KdPoint p;
             const auto &m = mMeans[index];

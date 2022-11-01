@@ -28,7 +28,12 @@ int main(int argc,const char **argv)
     printf("Running Kmeans against:%d input points.\n", pointCount);
     {
         ScopedTime st("Kmeans Time");
-        const float *results = kpp->compute(points, pointCount, 2000, resultPointCount);
+        kmeans::Kmeans::Parameters p;
+        p.mPoints = points;
+        p.mPointCount = pointCount;
+        p.mMaxPoints = 2000;
+        p.mMaximumPlusPlusCount = p.mMaxPoints*4;
+        const float *results = kpp->compute(p, resultPointCount);
     }
     kpp->release();
 }
