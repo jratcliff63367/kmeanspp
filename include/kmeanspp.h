@@ -2,6 +2,12 @@
 
 #include <stdint.h>
 
+#define USE_KDTREE 0
+
+#if USE_KDTREE
+#include "kdtree.h"
+#endif
+
 namespace kmeans
 {
 
@@ -191,6 +197,7 @@ public:
         printf("TimeInitializing: %0.2f seconds\n",mTimeInitializing);
         printf("ClosestDistances: %0.2f seconds\n",mTimeClosestDistances);
         printf("RandomSampling:   %0.2f seconds\n",mTimeRandomSampling);
+        printf("BuildingKdTree:   %0.2f seconds\n",mTimeRebuildingKdTree);
         printf("TimeClusters:     %0.2f seconds\n",mTimeClusters);
         printf("TimeMeans:        %0.2f seconds\n",mTimeMeans);
         printf("TimeTermination:  %0.2f seconds\n",mTimeTermination);
@@ -272,7 +279,6 @@ public:
 
     void initializeClusters(void)
     {
-
         std::random_device rand_device;
         uint64_t seed = 0; //rand_device();
         // Using a very simple PRBS generator, parameters selected according to
@@ -284,24 +290,54 @@ public:
             size_t rindex = uniform_generator(rand_engine);
             mMeans.push_back(mData[rindex]);
         }
+#if USE_KDTREE
+        kdtree::KdTree kdt;
+        kdt.reservePoints(mK);
+        kdtree::KdPoint p;
+        const auto &m = mMeans[0];
+        p.mId = 0;
+        p.mPos[0] = m.x;
+        p.mPos[1] = m.y;
+        p.mPos[2] = m.z;
+        kdt.addPoint(p);
+        kdt.buildTree();
+#endif
         DistanceVector distances;
         distances.resize(mData.size());
         for (uint32_t count = 1; count < mK; ++count) 
         {
             Timer t;
             // Calculate the distance to the closest mean for each data point
+#if USE_KDTREE
+            closestDistance(kdt, mData, distances);
+#else
             closestDistance(mMeans, mData, distances);
+#endif
             mTimeClosestDistances+=t.getElapsedSeconds();
             // Pick a random point weighted by the distance from existing means
             // TODO: This might convert floating point weights to ints, distorting the distribution for small weights
             std::discrete_distribution<size_t> generator(distances.begin(), distances.end());
             uint32_t index = (uint32_t)mMeans.size();
             mMeans.push_back(mData[generator(rand_engine)]);
+#if USE_KDTREE
+            kdtree::KdPoint p;
+            const auto &m = mMeans[index];
+            p.mId = index;
+            p.mPos[0] = m.x;
+            p.mPos[1] = m.y;
+            p.mPos[2] = m.z;
+            kdt.addPoint(p);
+            Timer tt;
+            kdt.buildTree();
+            mTimeRebuildingKdTree+=tt.getElapsedSeconds();
+#endif
             mTimeRandomSampling+=t.getElapsedSeconds();
         }
     }
 
-    void closestDistance(const Point3Vector &means,const Point3Vector &data,DistanceVector &distances) 
+    void closestDistance(const Point3Vector &means,
+                         const Point3Vector &data,
+                         DistanceVector &distances) 
     {
         uint32_t index = 0;
         for (auto& d : data) 
@@ -319,6 +355,21 @@ public:
             index++;
         }
     }
+
+#if USE_KDTREE
+    void closestDistance(kdtree::KdTree &kdt,
+        const Point3Vector &data,
+        DistanceVector &distances)
+    {
+        uint32_t index = 0;
+        for (auto& d : data)
+        {
+            kdtree::KdPoint p(d.x,d.y,d.z),r;
+            distances[index] = kdt.findNearest(p,r);
+            index++;
+        }
+    }
+#endif
 
     void calculateClusters(void)
     {
@@ -357,6 +408,7 @@ public:
     double           mTimeTermination{0};
     double           mTimeClosestDistances{0};
     double           mTimeRandomSampling{0};
+    double           mTimeRebuildingKdTree{0};
 };
 
 Kmeans *Kmeans::create(void)

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <stdint.h>
+#include <vector>
 
 namespace kdtree
 {
@@ -8,6 +9,13 @@ namespace kdtree
 class KdPoint
 {
 public:
+    KdPoint(void) { };
+    KdPoint(float x,float y,float z)
+    {
+        mPos[0] = x;
+        mPos[1] = y;
+        mPos[2] = z;
+    }
     uint32_t      mId{ 0 };
     float         mPos[3]{ 0,0,0 };
 };
@@ -20,6 +28,7 @@ public:
     KdNode       *mRight{nullptr};
 };
 
+using KdNodeVector = std::vector< KdNode >;
 
 class KdTree
 {
@@ -32,7 +41,54 @@ public:
     {
     }
 
-    inline void swap(KdNode *a,KdNode *b) 
+    void reservePoints(uint32_t pcount)
+    {
+        mNodes.clear();
+        mNodes.reserve(pcount);
+    }
+
+    // Add this point...
+    void addPoint(const KdPoint &p)
+    {
+        KdNode n;
+        n.mPoint = p;
+        mNodes.push_back(n);
+    }
+
+    void buildTree(void)
+    {
+        if( !mNodes.empty() )
+        {
+            uint32_t count = uint32_t(mNodes.size());
+            mRoot = buildTree(&mNodes[0],count,0);
+        }
+    }
+
+    /**
+    * Note this returns the *squared distance*.
+    * If you want the exact distance you must perform a square root on
+    * the return value
+    */
+    float findNearest(const KdPoint &p,KdPoint &result)
+    {
+        float ret = -1;
+
+        KdNode find;
+        find.mPoint = p;
+        const KdNode *best=nullptr;
+        float nearestDistanceSquared = FLT_MAX;
+        nearest(mRoot,&find,0,best,nearestDistanceSquared);
+        if ( best )
+        {
+            ret = nearestDistanceSquared;
+            result = best->mPoint;
+        }
+        return ret;
+    }
+
+private:
+
+    inline void swap(KdNode *a, KdNode *b)
     {
         KdNode temp;
         temp.mPoint = a->mPoint;
@@ -40,7 +96,7 @@ public:
         b->mPoint = temp.mPoint;
     }
 
-    KdNode *findMedian(KdNode *start,KdNode *end,int idx)
+    KdNode *findMedian(KdNode *start, KdNode *end, int idx)
     {
         if (end <= start) return nullptr;
         if (end == start + 1)
@@ -50,14 +106,14 @@ public:
 
         KdNode *p, *store, *md = start + (end - start) / 2;
         float pivot;
-        while (1) 
+        while (1)
         {
             pivot = md->mPoint.mPos[idx];
 
             swap(md, end - 1);
-            for (store = p = start; p < end; p++) 
+            for (store = p = start; p < end; p++)
             {
-                if (p->mPoint.mPos[idx] < pivot) 
+                if (p->mPoint.mPos[idx] < pivot)
                 {
                     if (p != store)
                     {
@@ -74,7 +130,7 @@ public:
                 break;
             }
 
-            if (store > md) 
+            if (store > md)
             {
                 end = store;
             }
@@ -86,32 +142,32 @@ public:
         return md;
     }
 
-    KdNode *buildTree(KdNode *nodes,uint32_t nodeCount,uint32_t index)
+    KdNode *buildTree(KdNode *nodes, uint32_t nodeCount, uint32_t index)
     {
         KdNode *n;
-        if ( nodeCount == 0 ) return nullptr;
-        if ( ( n = findMedian(nodes,nodes+nodeCount,index)))
+        if (nodeCount == 0) return nullptr;
+        if ((n = findMedian(nodes, nodes + nodeCount, index)))
         {
-            index = (index+1)%3;
-            n->mLeft = buildTree(nodes,uint32_t(n-nodes),index);
-            n->mRight = buildTree(n+1,uint32_t(nodes+nodeCount - (n+1)), index);
+            index = (index + 1) % 3;
+            n->mLeft = buildTree(nodes, uint32_t(n - nodes), index);
+            n->mRight = buildTree(n + 1, uint32_t(nodes + nodeCount - (n + 1)), index);
         }
         return n;
     }
 
-    float dist(const KdNode *a,const KdNode *b)
+    float dist(const KdNode *a, const KdNode *b)
     {
         float dx = a->mPoint.mPos[0] - b->mPoint.mPos[0];
         float dy = a->mPoint.mPos[1] - b->mPoint.mPos[1];
         float dz = a->mPoint.mPos[2] - b->mPoint.mPos[2];
-        return dx*dx + dy*dy + dz*dz;
+        return dx * dx + dy * dy + dz * dz;
     }
 
     void nearest(const KdNode *root,
-                 const KdNode *nd,
-                 int index,
-                 const KdNode *&best,
-                 float &nearestDistanceSquared)
+        const KdNode *nd,
+        int index,
+        const KdNode *&best,
+        float &nearestDistanceSquared)
     {
         float d, dx, dx2;
 
@@ -121,7 +177,7 @@ public:
         dx = root->mPoint.mPos[index] - nd->mPoint.mPos[index];
         dx2 = dx * dx;
 
-        if (!best || d < nearestDistanceSquared) 
+        if (!best || d < nearestDistanceSquared)
         {
             nearestDistanceSquared = d;
             best = root;
@@ -130,7 +186,7 @@ public:
         /* if chance of exact match is high */
         if (nearestDistanceSquared == 0) return;
 
-        index = (index+1)%3;
+        index = (index + 1) % 3;
 
         nearest(dx > 0 ? root->mLeft : root->mRight, nd, index, best, nearestDistanceSquared);
         if (dx2 >= nearestDistanceSquared) return;
@@ -138,7 +194,11 @@ public:
 
     }
 
-private:
+
+    KdNode          *mRoot{nullptr};
+    KdNodeVector    mNodes;
+
+
 };
 
 
