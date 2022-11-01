@@ -276,6 +276,7 @@ public:
 
     void initializeClusters(void)
     {
+
         std::random_device rand_device;
         uint64_t seed = 0; //rand_device();
         // Using a very simple PRBS generator, parameters selected according to
@@ -289,6 +290,53 @@ public:
         }
 #if USE_KDTREE
         kdtree::KdTree<float> kdt;
+
+        kdtree::Vertex<float> bmin;
+        kdtree::Vertex<float> bmax;
+        for (size_t i = 0; i < mData.size(); i++)
+        {
+            const auto &v = mData[i];
+            if (i == 0)
+            {
+                bmin.mPoint[0] = v.x;
+                bmin.mPoint[1] = v.y;
+                bmin.mPoint[2] = v.z;
+
+                bmax.mPoint[0] = v.x;
+                bmax.mPoint[1] = v.y;
+                bmax.mPoint[2] = v.z;
+            }
+            else
+            {
+                if (v.x < bmin.mPoint[0])
+                {
+                    bmin.mPoint[0] = v.x;
+                }
+                if (v.y < bmin.mPoint[1])
+                {
+                    bmin.mPoint[1] = v.y;
+                }
+                if (v.z < bmin.mPoint[2])
+                {
+                    bmin.mPoint[2] = v.z;
+                }
+                if (v.x > bmax.mPoint[0])
+                {
+                    bmax.mPoint[0] = v.x;
+                }
+                if (v.y > bmax.mPoint[1])
+                {
+                    bmax.mPoint[1] = v.y;
+                }
+                if (v.z > bmax.mPoint[2])
+                {
+                    bmax.mPoint[2] = v.z;
+                }
+            }
+        }
+        kdt.initBounds(bmin,bmax);
+
+
         kdtree::Vertex<float> kv;
         kv.mPoint[0] = mMeans[0].x;
         kv.mPoint[1] = mMeans[0].y;

@@ -22,6 +22,9 @@ int main(int argc,const char **argv)
         points[i] = (float) uniform_generator(rand_engine);
     }
 
+
+    
+
     kmeans::Kmeans *kpp = kmeans::Kmeans::create();
     uint32_t resultPointCount;
     printf("Running Kmeans against:%d input points.\n", pointCount);

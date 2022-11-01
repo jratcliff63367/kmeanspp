@@ -10,6 +10,9 @@ enum Axes
     Z_AXIS = 2
 };
 
+// This id is reserved for seed points to keep the kdtree balanced
+static const uint32_t RESERVE_ID = 0xFFFFFFFF;
+
 /*
  * To minimize memory allocations while maintaining pointer stability.
  * Used in KdTreeNode and ConvexHull, as both use tree data structures that rely on pointer stability
@@ -243,15 +246,15 @@ public:
         Type r2 = radius * radius;
         Type m = position.getDistanceSquared(pos);
         // if the distance between this point and the radius match
-        if (m < r2)
+        if ( position.mId != RESERVE_ID && m < r2)
         {
             // If this is less than the current closest point found
             // this becomes the new closest point found
             if (m < found.mDistanceSquared)
             {
+                radius = (Type)sqrt(m);
                 found.mNode = this;   // Remember the node
                 found.mDistanceSquared = m;  // Remember the distance to this node
-                radius = (Type)sqrt(m);
                 // If we have found something with a distance of zero we can stop searching
                 if (found.mNode && found.mDistanceSquared == 0)
                 {
@@ -370,6 +373,39 @@ public:
     inline uint32_t getVCount() const
     {
         return uint32_t(m_vertices.size());
+    }
+
+    void initBounds(const Vertex<Type> &bmin,const Vertex<Type> &bmax)
+    {
+        Vertex<Type> center;
+        center.mPoint[0] = (bmin.mPoint[0] + bmax.mPoint[0]) * 0.5f;
+        center.mPoint[1] = (bmin.mPoint[1] + bmax.mPoint[1]) * 0.5f;
+        center.mPoint[2] = (bmin.mPoint[2] + bmax.mPoint[2]) * 0.5f;
+        Vertex<Type> diff;
+        diff.mPoint[0] = bmax.mPoint[0] - center.mPoint[0];
+        diff.mPoint[1] = bmax.mPoint[1] - center.mPoint[1];
+        diff.mPoint[2] = bmax.mPoint[2] - center.mPoint[2];
+        center.mId = RESERVE_ID;
+        add(center);
+        for (int32_t i=1; i<=8; i++)
+        {
+            Type ratio = (Type)i/8.0f;
+            Vertex<Type> p1;
+            Vertex<Type> p2;
+            p1.mId = RESERVE_ID;
+            p2.mId = RESERVE_ID;
+            p1.mPoint[0] = center.mPoint[0] + (diff.mPoint[0]*ratio);
+            p1.mPoint[1] = center.mPoint[1] + (diff.mPoint[1]*ratio);
+            p1.mPoint[2] = center.mPoint[2] + (diff.mPoint[2]*ratio);
+
+            p2.mPoint[0] = center.mPoint[0] - (diff.mPoint[0] * ratio);
+            p2.mPoint[1] = center.mPoint[1] - (diff.mPoint[1] * ratio);
+            p2.mPoint[2] = center.mPoint[2] - (diff.mPoint[2] * ratio);
+
+            add(p1);
+            add(p2);
+
+        }
     }
 
 private:
