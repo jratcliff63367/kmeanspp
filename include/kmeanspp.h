@@ -2,7 +2,7 @@
 
 #include <stdint.h>
 
-#define USE_KDTREE 1
+#define USE_KDTREE 0
 
 #if USE_KDTREE
 #include "kdtree.h"
@@ -465,10 +465,38 @@ public:
 
     void calculateClusters(void)
     {
+#if USE_KDTREE
+        kdtree::KdTree kdt;
+        uint32_t msize = uint32_t(mMeans.size());
+        kdt.reservePoints(msize);
+        for (uint32_t i=0; i<msize; i++)
+        {
+            const auto &p = mMeans[i];
+            kdtree::KdPoint kp;
+            kp.mPos[0] = p.x;
+            kp.mPos[1] = p.y;
+            kp.mPos[2] = p.z;
+            kp.mId = i;
+            kdt.addPoint(kp);
+        }
+        kdt.buildTree();
+        for (size_t i = 0; i < mData.size(); i++)
+        {
+            const auto &p = mData[i];
+            kdtree::KdPoint kp;
+            kp.mPos[0] = p.x;
+            kp.mPos[1] = p.y;
+            kp.mPos[2] = p.z;
+            kdtree::KdPoint result;
+            kdt.findNearest(kp,result);
+            mClusters[i] = result.mId;
+        }
+#else
         for (size_t i=0; i<mData.size(); i++)
         {
             mClusters[i] = closestMean(mData[i]);
         }
+#endif
     }
 
     uint32_t closestMean(const Point3 &p) const
