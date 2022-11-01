@@ -1,418 +1,144 @@
 #pragma once
 
+#include <stdint.h>
+
 namespace kdtree
 {
 
-enum Axes
+class KdPoint
 {
-    X_AXIS = 0,
-    Y_AXIS = 1,
-    Z_AXIS = 2
+public:
+    uint32_t      mId{ 0 };
+    float         mPos[3]{ 0,0,0 };
 };
 
-// This id is reserved for seed points to keep the kdtree balanced
-static const uint32_t RESERVE_ID = 0xFFFFFFFF;
-
-/*
- * To minimize memory allocations while maintaining pointer stability.
- * Used in KdTreeNode and ConvexHull, as both use tree data structures that rely on pointer stability
- * Neither rely on random access or iteration
- * They just dump elements into a memory pool, then refer to pointers to the elements
- * All elements are default constructed in NodeStorage's m_nodes array
- */
-template <typename T, std::size_t MaxBundleSize = 1024>
-class NodeBundle
+class KdNode
 {
-    struct NodeStorage 
-    {
-        inline bool isFull() const
-        {
-            return m_index == MaxBundleSize;
-        }
-
-        inline T& getNextNode()
-        {
-            assert(m_index < MaxBundleSize);
-            T& ret = m_nodes[m_index];
-            m_index++;
-            return ret;
-        }
-
-        std::size_t m_index;
-        std::array<T, MaxBundleSize> m_nodes;
-    };
-
-    std::list<NodeStorage> m_list;
-    typename std::list<NodeStorage>::iterator m_head{ m_list.end() };
-
 public:
-    inline T& getNextNode()
-    {
-        /*
-         * || short circuits, so doesn't dereference if m_bundle == m_bundleHead.end()
-         */
-        if (   m_head == m_list.end() || m_head->isFull())
-        {
-            m_head = m_list.emplace(m_list.end());
-        }
-        return m_head->getNextNode();
-    }
-
-    inline T& getFirstNode()
-    {
-        assert(m_head != m_list.end());
-        return m_list.front().m_nodes[0];
-    }
-
-    inline void clear()
-    {
-        m_list.clear();
-    }
+    KdPoint       mPoint;
+    KdNode       *mLeft{nullptr};
+    KdNode       *mRight{nullptr};
 };
 
 
-template <class Type> class Vertex
+class KdTree
 {
 public:
-    Vertex(void)
+    KdTree(void)
     {
-    }
-    Vertex(const Vertex &v) 
-    {
-        mPoint[0] = v.mPoint[0];
-        mPoint[1] = v.mPoint[1];
-        mPoint[2] = v.mPoint[2];
-        mId = v.mId;
-    }
-    Vertex(Type x,Type y,Type z,uint32_t id)
-    {
-        mPoint[0] = x;
-        mPoint[1] = y;
-        mPoint[2] = z;
-        mId = id;
     }
 
-    inline Vertex operator-(const Vertex &v) const
+    ~KdTree(void)
     {
-        return Vertex( mPoint[0] - v.mPoint[0],
-                       mPoint[1] - v.mPoint[1],
-                       mPoint[2] - v.mPoint[2],mId);
     }
 
-    inline Type getNormSquared(void) const
+    inline void swap(KdNode *a,KdNode *b) 
     {
-        return mPoint[0]*mPoint[0] + mPoint[1]*mPoint[1] + mPoint[2] *mPoint[2];
+        KdNode temp;
+        temp.mPoint = a->mPoint;
+        a->mPoint = b->mPoint;
+        b->mPoint = temp.mPoint;
     }
 
-    inline Type getDistanceSquared(const Vertex &v) const
+    KdNode *findMedian(KdNode *start,KdNode *end,int idx)
     {
-        Type dx = v.mPoint[0] - mPoint[0];
-        Type dy = v.mPoint[1] - mPoint[1];
-        Type dz = v.mPoint[2] - mPoint[2];
+        if (end <= start) return nullptr;
+        if (end == start + 1)
+        {
+            return start;
+        }
+
+        KdNode *p, *store, *md = start + (end - start) / 2;
+        float pivot;
+        while (1) 
+        {
+            pivot = md->mPoint.mPos[idx];
+
+            swap(md, end - 1);
+            for (store = p = start; p < end; p++) 
+            {
+                if (p->mPoint.mPos[idx] < pivot) 
+                {
+                    if (p != store)
+                    {
+                        swap(p, store);
+                    }
+                    store++;
+                }
+            }
+            swap(store, end - 1);
+
+            /* median has duplicate values */
+            if (store->mPoint.mPos[idx] == md->mPoint.mPos[idx])
+            {
+                break;
+            }
+
+            if (store > md) 
+            {
+                end = store;
+            }
+            else
+            {
+                start = store;
+            }
+        }
+        return md;
+    }
+
+    KdNode *buildTree(KdNode *nodes,uint32_t nodeCount,uint32_t index)
+    {
+        KdNode *n;
+        if ( nodeCount == 0 ) return nullptr;
+        if ( ( n = findMedian(nodes,nodes+nodeCount,index)))
+        {
+            index = (index+1)%3;
+            n->mLeft = buildTree(nodes,uint32_t(n-nodes),index);
+            n->mRight = buildTree(n+1,uint32_t(nodes+nodeCount - (n+1)), index);
+        }
+        return n;
+    }
+
+    float dist(const KdNode *a,const KdNode *b)
+    {
+        float dx = a->mPoint.mPos[0] - b->mPoint.mPos[0];
+        float dy = a->mPoint.mPos[1] - b->mPoint.mPos[1];
+        float dz = a->mPoint.mPos[2] - b->mPoint.mPos[2];
         return dx*dx + dy*dy + dz*dz;
     }
 
-    Type   mPoint[3];
-    uint32_t mId;
-};
-
-template <class Type>class KdTreeInterface
-{
-public:
-    virtual const Vertex<Type>& getPosition(uint32_t index) const = 0;
-};
-
-template <class Type> class KdTreeNode;
-
-// This is a small struct used internally when doing a search of 
-//the KdTree. It returns which node and what distance matched the
-// search criteria
-template <class Type> class KdTreeFindNode
-{
-public:
-    KdTreeFindNode() = default;
-
-    KdTreeNode<Type>* mNode{ nullptr };
-    Type mDistanceSquared{ 0.0 };
-    uint32_t    mTestCount{0};
-};
-
-template <class Type> class KdTreeNode
-{
-public:
-    KdTreeNode<Type>() = default;
-    KdTreeNode<Type>(uint32_t index) : m_index(index)
+    void nearest(const KdNode *root,
+                 const KdNode *nd,
+                 int index,
+                 const KdNode *&best,
+                 float &nearestDistanceSquared)
     {
-    }
+        float d, dx, dx2;
 
-    inline void add(KdTreeNode<Type>& node,
-        Axes dim,
-        const KdTreeInterface<Type>& tree)
-    {
-        Axes axis = X_AXIS;
-        uint32_t idx = 0;
-        switch (dim)
+        if (!root) return;
+
+        d = dist(root, nd);
+        dx = root->mPoint.mPos[index] - nd->mPoint.mPos[index];
+        dx2 = dx * dx;
+
+        if (!best || d < nearestDistanceSquared) 
         {
-        case X_AXIS:
-            idx = 0;
-            axis = Y_AXIS;
-            break;
-        case Y_AXIS:
-            idx = 1;
-            axis = Z_AXIS;
-            break;
-        case Z_AXIS:
-            idx = 2;
-            axis = X_AXIS;
-            break;
+            nearestDistanceSquared = d;
+            best = root;
         }
 
-        const Vertex<Type>& nodePosition = tree.getPosition(node.m_index);
-        const Vertex<Type>& position = tree.getPosition(m_index);
-        if (nodePosition.mPoint[idx] <= position.mPoint[idx])
-        {
-            if (m_left)
-                m_left->add(node, axis, tree);
-            else
-                m_left = &node;
-        }
-        else
-        {
-            if (m_right)
-                m_right->add(node, axis, tree);
-            else
-                m_right = &node;
-        }
-    }
+        /* if chance of exact match is high */
+        if (nearestDistanceSquared == 0) return;
 
-    inline uint32_t getIndex() const
-    {
-        return m_index;
-    }
+        index = (index+1)%3;
 
-    inline void search(Axes axis,
-        const Vertex<Type>& pos,
-        Type &radius,
-        KdTreeFindNode<Type> &found,
-        const KdTreeInterface<Type>& iface)
-    {
-        // If we have found something with a distance of zero we can stop searching
-        if ( found.mNode && found.mDistanceSquared == 0 )
-        {
-            return;
-        }
-        // Get the position of this node
-        const Vertex<Type> position = iface.getPosition(m_index);
-        // Compute the difference between this node position and the point
-        // we are searching against
-        const Vertex<Type> d = pos - position;
+        nearest(dx > 0 ? root->mLeft : root->mRight, nd, index, best, nearestDistanceSquared);
+        if (dx2 >= nearestDistanceSquared) return;
+        nearest(dx > 0 ? root->mRight : root->mLeft, nd, index, best, nearestDistanceSquared);
 
-        KdTreeNode<Type>* search1 = 0;
-        KdTreeNode<Type>* search2 = 0;
-
-        // Compute the array index (X,Y,Z) and increment
-        // the axis to the next search plane
-        uint32_t idx = 0;
-        switch (axis)
-        {
-        case X_AXIS:
-            idx = 0;
-            axis = Y_AXIS;
-            break;
-        case Y_AXIS:
-            idx = 1;
-            axis = Z_AXIS;
-            break;
-        case Z_AXIS:
-            idx = 2;
-            axis = X_AXIS;
-            break;
-        }
-
-        if (d.mPoint[idx] <= 0) // JWR  if we are to the left
-        {
-            search1 = m_left; // JWR  then search to the left
-            if (-d.mPoint[idx] < radius) // JWR  if distance to the right is less than our search radius, continue on the right
-                                // as well.
-                search2 = m_right;
-        }
-        else
-        {
-            search1 = m_right; // JWR  ok, we go down the left tree
-            if (d.mPoint[idx] < radius) // JWR  if the distance from the right is less than our search radius
-                search2 = m_left;
-        }
-        found.mTestCount++;
-        Type r2 = radius * radius;
-        Type m = position.getDistanceSquared(pos);
-        // if the distance between this point and the radius match
-        if ( position.mId != RESERVE_ID && m < r2)
-        {
-            // If this is less than the current closest point found
-            // this becomes the new closest point found
-            if (m < found.mDistanceSquared)
-            {
-                radius = (Type)sqrt(m);
-                found.mNode = this;   // Remember the node
-                found.mDistanceSquared = m;  // Remember the distance to this node
-                // If we have found something with a distance of zero we can stop searching
-                if (found.mNode && found.mDistanceSquared == 0)
-                {
-                    search1 = nullptr;
-                    search2 = nullptr;
-                }
-            }
-        }
-
-
-        if (search1)
-        {
-            search1->search(axis, pos, radius, found, iface);
-        }
-
-        if (search2)
-        {
-            search2->search(axis, pos, radius, found, iface);
-        }
     }
 
 private:
-    uint32_t m_index = 0;
-    KdTreeNode<Type>* m_left = nullptr;
-    KdTreeNode<Type>* m_right = nullptr;
-};
-
-
-
-
-template <class Type> class KdTree : public KdTreeInterface<Type>
-{
-public:
-    KdTree() = default;
-
-    virtual const Vertex<Type>& getPosition(uint32_t index) const
-    {
-        assert(index < m_vertices.size());
-        return m_vertices[index];
-    }
-
-    // Search for the nearest position within the radius provided
-    // If the return value is -1 that means we could not find a point in range
-    // If the value is greater than or equal to zero then that is the distance
-    // between the search position and the nearest position.
-    // The result position and index is stored in 'result'.
-    Type findNearest(const Vertex<Type>& pos,
-                    Type _radius,
-                    uint32_t &searchCount,
-                    Vertex<Type> &result) const
-    {
-        Type ret = -1;
-        searchCount = 0;
-        if (!m_root)
-            return ret;
-        Type radius = _radius;
-        KdTreeFindNode<Type> found;
-        // If the distance from the position we are searching against
-        // and the root node is less than the search radius provided then
-        // we shrink the search radius down since the root node is already
-        // the 'nearest' relative to the search criteria given
-        const Vertex<Type> &rootPos = getPosition(m_root->getIndex());
-        Type d2 = rootPos.getDistanceSquared(pos);
-        Type pdist = (Type)sqrt(d2);
-        if (pdist <= radius)
-        {
-            radius = pdist;
-            found.mDistanceSquared = radius*radius;
-            found.mNode = m_root;
-        }
-        m_root->search(X_AXIS, pos, radius, found, *this);
-        if ( found.mNode )
-        {
-            ret = (Type) sqrt(found.mDistanceSquared);
-            result = getPosition(found.mNode->getIndex());
-            searchCount = found.mTestCount;
-        }
-        return ret;
-    }
-
-    inline uint32_t add(const Vertex<Type>& v)
-    {
-        uint32_t ret = uint32_t(m_vertices.size());
-        m_vertices.emplace_back(v);
-        KdTreeNode<Type>& node = getNewNode(ret);
-        if (m_root)
-        {
-            m_root->add(node,
-                X_AXIS,
-                *this);
-        }
-        else
-        {
-            m_root = &node;
-        }
-        return ret;
-    }
-
-    inline KdTreeNode<Type>& getNewNode(uint32_t index)
-    {
-        KdTreeNode<Type>& node = m_bundle.getNextNode();
-        node = KdTreeNode<Type>(index);
-        return node;
-    }
-
-    inline const std::vector<Vertex<Type>>& getVertices() const
-    {
-        return m_vertices;
-    }
-
-    inline std::vector<Vertex<Type>>&& takeVertices()
-    {
-        return std::move(m_vertices);
-    }
-
-    inline uint32_t getVCount() const
-    {
-        return uint32_t(m_vertices.size());
-    }
-
-    void initBounds(const Vertex<Type> &bmin,const Vertex<Type> &bmax)
-    {
-        Vertex<Type> center;
-        center.mPoint[0] = (bmin.mPoint[0] + bmax.mPoint[0]) * 0.5f;
-        center.mPoint[1] = (bmin.mPoint[1] + bmax.mPoint[1]) * 0.5f;
-        center.mPoint[2] = (bmin.mPoint[2] + bmax.mPoint[2]) * 0.5f;
-        Vertex<Type> diff;
-        diff.mPoint[0] = bmax.mPoint[0] - center.mPoint[0];
-        diff.mPoint[1] = bmax.mPoint[1] - center.mPoint[1];
-        diff.mPoint[2] = bmax.mPoint[2] - center.mPoint[2];
-        center.mId = RESERVE_ID;
-        add(center);
-        for (int32_t i=1; i<=8; i++)
-        {
-            Type ratio = (Type)i/8.0f;
-            Vertex<Type> p1;
-            Vertex<Type> p2;
-            p1.mId = RESERVE_ID;
-            p2.mId = RESERVE_ID;
-            p1.mPoint[0] = center.mPoint[0] + (diff.mPoint[0]*ratio);
-            p1.mPoint[1] = center.mPoint[1] + (diff.mPoint[1]*ratio);
-            p1.mPoint[2] = center.mPoint[2] + (diff.mPoint[2]*ratio);
-
-            p2.mPoint[0] = center.mPoint[0] - (diff.mPoint[0] * ratio);
-            p2.mPoint[1] = center.mPoint[1] - (diff.mPoint[1] * ratio);
-            p2.mPoint[2] = center.mPoint[2] - (diff.mPoint[2] * ratio);
-
-            add(p1);
-            add(p2);
-
-        }
-    }
-
-private:
-    KdTreeNode<Type>* m_root{ nullptr };
-    NodeBundle<KdTreeNode<Type>> m_bundle;
-
-    std::vector<Vertex<Type>> m_vertices;
 };
 
 
