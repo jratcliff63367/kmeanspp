@@ -18,6 +18,7 @@ public:
         // If this is the same size as max-points then we just
         // do a random distribution and bypass the kmeans++ computation
         uint32_t     mMaximumPlusPlusCount{0};
+        uint32_t     mMaxIterations{100};
         bool        mUseKdTree{true}; // you would always want this to true unless trying to debug something
     };
     static Kmeans *create(void);
@@ -211,33 +212,50 @@ public:
         }
 
         uint32_t count = 0;
-        uint32_t maxIterations = 100;
-        mOldMeans = mMeans;
-        mOldOldMeans = mMeans;
+        // Resize the means container to have room for
+        // a total of three copies.
+        // When iterating on kmeans we stop if the means results are
+        // the same as the previous iteration *or* the one before that.
+        // To avoid memory copying we instead just cycle pointers
+        size_t msize = mMeans.size();
+        mMeans.resize(msize*3);
+        mCurrentMeans = &mMeans[0];
+        mOldMeans = &mMeans[msize];
+        mOldOldMeans = &mMeans[msize*2];
+        memcpy(mOldMeans,mCurrentMeans,sizeof(Point3)*msize);
+        memcpy(mOldOldMeans,mCurrentMeans,sizeof(Point3)*msize);
+
         do 
         {
             {
                 Timer t;
-                calculateClusters(params.mUseKdTree);
+                calculateClusters(params.mUseKdTree,msize);
                 mTimeClusters+=t.getElapsedSeconds();
             }
             Timer t;
+            // Pointer swap, the current means is now the old means.
+            // The old means is now the old-old means
+            // And the old old means pointer now becomes the current means pointer
+            Point3 *temp = mOldOldMeans;
             mOldOldMeans = mOldMeans;
-            mOldMeans = mMeans;
-            calculateMeans();
+            mOldMeans = mCurrentMeans;
+            mCurrentMeans = temp;
+
+            calculateMeans(mCurrentMeans,msize,mOldMeans);
+
             mTimeMeans+=t.getElapsedSeconds();
             count++;
             Timer tm;
-            if ( sameMeans(mMeans,mOldMeans))
+            if ( sameMeans(mCurrentMeans,mOldMeans,msize))
             {
                 break;
             }
-            if (sameMeans(mMeans, mOldOldMeans))
+            if (sameMeans(mCurrentMeans, mOldOldMeans,msize))
             {
                 break;
             }
             mTimeTermination+=tm.getElapsedSeconds();
-        } while ( count < maxIterations );
+        } while ( count < params.mMaxIterations );
 
         resultPointCount = mK;
         ret = &mMeans[0].x;
@@ -271,11 +289,11 @@ public:
     }
 
 
-    bool sameMeans(const Point3Vector &a,const Point3Vector &b)
+    bool sameMeans(const Point3 *a,const Point3 *b,size_t msize)
     {
         bool ret = true;
 
-        for (size_t i=0; i<a.size(); i++)
+        for (size_t i=0; i<msize; i++)
         {
             if ( a[i] != b[i] )
             {
@@ -287,17 +305,21 @@ public:
         return ret;
     }
 
-    void calculateMeans(void)
+    void calculateMeans(Point3 *means,
+                        size_t msize,
+                        const Point3 *oldMeans)
     {
         std::vector< uint32_t > counts;
-        counts.resize(mK);
-        memset(&counts[0],0,sizeof(uint32_t)*mK);
-        memset(&mMeans[0],0,sizeof(Point3)*mK);
+        assert( mData.size() == mClusters.size() );
+        counts.resize(msize);
+        memset(&counts[0],0,sizeof(uint32_t)*msize);
+        memset(means,0,sizeof(Point3)*msize);
 
         for (size_t i=0; i<mClusters.size(); i++)
         {
             uint32_t id = mClusters[i];
-            auto &mean = mMeans[id];
+            assert( id < uint32_t(msize) );
+            auto &mean = means[id];
             counts[id]++;
 
             const auto &p = mData[i];
@@ -305,18 +327,18 @@ public:
             mean.y+=p.y;
             mean.z+=p.z;
         }
-        for (size_t i=0; i<mK; i++)
+        for (size_t i=0; i<msize; i++)
         {
             if ( counts[i] == 0 )
             {
-                mMeans[i] = mOldMeans[i];
+                means[i] = oldMeans[i];
             }
             else
             {
                 float recip = 1.0f / float(counts[i]);
-                mMeans[i].x*=recip;
-                mMeans[i].y*=recip;
-                mMeans[i].z*=recip;
+                means[i].x*=recip;
+                means[i].y*=recip;
+                means[i].z*=recip;
             }
         }
     }
@@ -465,12 +487,11 @@ public:
     }
 #endif
 
-    void calculateClusters(bool useKdTree)
+    void calculateClusters(bool useKdTree,size_t msize)
     {
         if ( useKdTree )
         {
             kdtree::KdTree kdt;
-            uint32_t msize = uint32_t(mMeans.size());
             kdt.reservePoints(msize);
             for (uint32_t i=0; i<msize; i++)
             {
@@ -492,6 +513,7 @@ public:
                 kp.mPos[2] = p.z;
                 kdtree::KdPoint result;
                 kdt.findNearest(kp,result);
+                assert( result.mId < msize );
                 mClusters[i] = result.mId;
             }
         }
@@ -522,9 +544,13 @@ public:
 
     uint32_t        mK{32};     // Maximum number of mean values to produce
     Point3Vector    mData;      // Input data
+
+    Point3          *mCurrentMeans{nullptr};
+    Point3          *mOldMeans{nullptr};
+    Point3          *mOldOldMeans{nullptr};
+
     Point3Vector    mMeans;     // Means
-    Point3Vector    mOldMeans;  // Means on the previous iteration
-    Point3Vector    mOldOldMeans;  // Means on the previous iteration
+
     ClusterVector   mClusters;  // Which cluster each source data point is in
     double           mLimitDelta{0.001f};
     double           mTimeInitializing{0};
