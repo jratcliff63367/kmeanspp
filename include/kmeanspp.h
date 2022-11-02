@@ -2,9 +2,10 @@
 
 #include <stdint.h>
 
+#define REPORT_TIME 0
+
 namespace kmeans
 {
-
 
 class Kmeans
 {
@@ -53,7 +54,206 @@ protected:
 #include <vector>
 #include <chrono>
 
-#include "kdtree.h"
+namespace kdtree
+{
+
+class KdPoint
+{
+public:
+    KdPoint(void) { };
+    KdPoint(float x,float y,float z)
+    {
+        mPos[0] = x;
+        mPos[1] = y;
+        mPos[2] = z;
+    }
+    uint32_t      mId{ 0 };
+    float         mPos[3]{ 0,0,0 };
+};
+
+class KdNode
+{
+public:
+    KdPoint       mPoint;
+    KdNode       *mLeft{nullptr};
+    KdNode       *mRight{nullptr};
+};
+
+using KdNodeVector = std::vector< KdNode >;
+
+class KdTree
+{
+public:
+    KdTree(void)
+    {
+    }
+
+    ~KdTree(void)
+    {
+    }
+
+    void reservePoints(uint32_t pcount)
+    {
+        mNodes.clear();
+        mNodes.reserve(pcount);
+    }
+
+    // Add this point...
+    void addPoint(const KdPoint &p)
+    {
+        KdNode n;
+        n.mPoint = p;
+        mNodes.push_back(n);
+    }
+
+    void buildTree(void)
+    {
+        if( !mNodes.empty() )
+        {
+            uint32_t count = uint32_t(mNodes.size());
+            mRoot = buildTree(&mNodes[0],count,0);
+        }
+    }
+
+    /**
+    * Note this returns the *squared distance*.
+    * If you want the exact distance you must perform a square root on
+    * the return value
+    */
+    float findNearest(const KdPoint &p,KdPoint &result)
+    {
+        float ret = -1;
+
+        KdNode find;
+        find.mPoint = p;
+        const KdNode *best=nullptr;
+        float nearestDistanceSquared = FLT_MAX;
+        nearest(mRoot,&find,0,best,nearestDistanceSquared);
+        if ( best )
+        {
+            ret = nearestDistanceSquared;
+            result = best->mPoint;
+        }
+        return ret;
+    }
+
+private:
+
+    inline void swap(KdNode *a, KdNode *b)
+    {
+        KdNode temp;
+        temp.mPoint = a->mPoint;
+        a->mPoint = b->mPoint;
+        b->mPoint = temp.mPoint;
+    }
+
+    KdNode *findMedian(KdNode *start, KdNode *end, int idx)
+    {
+        if (end <= start) return nullptr;
+        if (end == start + 1)
+        {
+            return start;
+        }
+
+        KdNode *p, *store, *md = start + (end - start) / 2;
+        float pivot;
+        while (1)
+        {
+            pivot = md->mPoint.mPos[idx];
+
+            swap(md, end - 1);
+            for (store = p = start; p < end; p++)
+            {
+                if (p->mPoint.mPos[idx] < pivot)
+                {
+                    if (p != store)
+                    {
+                        swap(p, store);
+                    }
+                    store++;
+                }
+            }
+            swap(store, end - 1);
+
+            /* median has duplicate values */
+            if (store->mPoint.mPos[idx] == md->mPoint.mPos[idx])
+            {
+                break;
+            }
+
+            if (store > md)
+            {
+                end = store;
+            }
+            else
+            {
+                start = store;
+            }
+        }
+        return md;
+    }
+
+    KdNode *buildTree(KdNode *nodes, uint32_t nodeCount, uint32_t index)
+    {
+        KdNode *n;
+        if (nodeCount == 0) return nullptr;
+        if ((n = findMedian(nodes, nodes + nodeCount, index)))
+        {
+            index = (index + 1) % 3;
+            n->mLeft = buildTree(nodes, uint32_t(n - nodes), index);
+            n->mRight = buildTree(n + 1, uint32_t(nodes + nodeCount - (n + 1)), index);
+        }
+        return n;
+    }
+
+    float dist(const KdNode *a, const KdNode *b)
+    {
+        float dx = a->mPoint.mPos[0] - b->mPoint.mPos[0];
+        float dy = a->mPoint.mPos[1] - b->mPoint.mPos[1];
+        float dz = a->mPoint.mPos[2] - b->mPoint.mPos[2];
+        return dx * dx + dy * dy + dz * dz;
+    }
+
+    void nearest(const KdNode *root,
+        const KdNode *nd,
+        int index,
+        const KdNode *&best,
+        float &nearestDistanceSquared)
+    {
+        float d, dx, dx2;
+
+        if (!root) return;
+
+        d = dist(root, nd);
+        dx = root->mPoint.mPos[index] - nd->mPoint.mPos[index];
+        dx2 = dx * dx;
+
+        if (!best || d < nearestDistanceSquared)
+        {
+            nearestDistanceSquared = d;
+            best = root;
+        }
+
+        /* if chance of exact match is high */
+        if (nearestDistanceSquared == 0) return;
+
+        index = (index + 1) % 3;
+
+        nearest(dx > 0 ? root->mLeft : root->mRight, nd, index, best, nearestDistanceSquared);
+        if (dx2 >= nearestDistanceSquared) return;
+        nearest(dx > 0 ? root->mRight : root->mLeft, nd, index, best, nearestDistanceSquared);
+
+    }
+
+
+    KdNode          *mRoot{nullptr};
+    KdNodeVector    mNodes;
+
+
+};
+
+
+}
 
 namespace kmeans
 {
@@ -107,35 +307,37 @@ private:
     uint32_t mTop; // current top of the random number pool.
 };
 
-    class Timer
+#if REPORT_TIME
+class Timer
+{
+public:
+    Timer() : mStartTime(std::chrono::high_resolution_clock::now())
     {
-    public:
-        Timer() : mStartTime(std::chrono::high_resolution_clock::now())
-        {
-        }
+    }
 
-        void reset()
-        {
-            mStartTime = std::chrono::high_resolution_clock::now();
-        }
+    void reset()
+    {
+        mStartTime = std::chrono::high_resolution_clock::now();
+    }
 
-        double getElapsedSeconds()
-        {
-            auto s = peekElapsedSeconds();
-            reset();
-            return s;
-        }
+    double getElapsedSeconds()
+    {
+        auto s = peekElapsedSeconds();
+        reset();
+        return s;
+    }
 
-        double peekElapsedSeconds()
-        {
-            auto now = std::chrono::high_resolution_clock::now();
-            std::chrono::duration<double> diff = now - mStartTime;
-            return diff.count();
-        }
+    double peekElapsedSeconds()
+    {
+        auto now = std::chrono::high_resolution_clock::now();
+        std::chrono::duration<double> diff = now - mStartTime;
+        return diff.count();
+    }
 
-    private:
-        std::chrono::time_point<std::chrono::high_resolution_clock> mStartTime;
-    };
+private:
+    std::chrono::time_point<std::chrono::high_resolution_clock> mStartTime;
+};
+#endif
 
 
 class Point3
@@ -204,13 +406,15 @@ public:
         mClusters.resize(params.mPointCount);
         mData.resize(params.mPointCount);
         memcpy(&mData[0],params.mPoints,sizeof(float)*3*params.mPointCount);
-
         {
+#if REPORT_TIME
             Timer t;
+#endif
             initializeClusters(params);
+#if REPORT_TIME
             mTimeInitializing = t.getElapsedSeconds();
+#endif
         }
-
         uint32_t count = 0;
         // Resize the means container to have room for
         // a total of three copies.
@@ -228,11 +432,17 @@ public:
         do 
         {
             {
+#if REPORT_TIME
                 Timer t;
+#endif
                 calculateClusters(params.mUseKdTree,msize);
+#if REPORT_TIME
                 mTimeClusters+=t.getElapsedSeconds();
+#endif
             }
+#if REPORT_TIME
             Timer t;
+#endif
             // Pointer swap, the current means is now the old means.
             // The old means is now the old-old means
             // And the old old means pointer now becomes the current means pointer
@@ -242,10 +452,13 @@ public:
             mCurrentMeans = temp;
 
             calculateMeans(mCurrentMeans,msize,mOldMeans);
-
+#if REPORT_TIME
             mTimeMeans+=t.getElapsedSeconds();
+#endif
             count++;
+#if REPORT_TIME
             Timer tm;
+#endif
             if ( sameMeans(mCurrentMeans,mOldMeans,msize))
             {
                 break;
@@ -254,12 +467,14 @@ public:
             {
                 break;
             }
+#if REPORT_TIME
             mTimeTermination+=tm.getElapsedSeconds();
+#endif
         } while ( count < params.mMaxIterations );
 
         resultPointCount = mK;
         ret = &mMeans[0].x;
-
+#if REPORT_TIME
         printf("Ran             : %d iterations.\n",count);
         printf("TimeInitializing: %0.2f seconds\n",mTimeInitializing);
         printf("ClosestDistances: %0.2f seconds\n",mTimeClosestDistances);
@@ -268,7 +483,7 @@ public:
         printf("TimeClusters:     %0.2f seconds\n",mTimeClusters);
         printf("TimeMeans:        %0.2f seconds\n",mTimeMeans);
         printf("TimeTermination:  %0.2f seconds\n",mTimeTermination);
-
+#endif
         return ret;
     }
 
@@ -419,7 +634,9 @@ public:
         distances.resize(data.size());
         for (uint32_t count = 1; count < mK; ++count) 
         {
+#if REPORT_TIME
             Timer t;
+#endif
             // Calculate the distance to the closest mean for each data point
             if ( params.mUseKdTree )
             {
@@ -429,7 +646,9 @@ public:
             {
                 closestDistance(mMeans, data, distances);
             }
+#if REPORT_TIME
             mTimeClosestDistances+=t.getElapsedSeconds();
+#endif
             // Pick a random point weighted by the distance from existing means
             // TODO: This might convert floating point weights to ints, distorting the distribution for small weights
             std::discrete_distribution<size_t> generator(distances.begin(), distances.end());
@@ -444,11 +663,17 @@ public:
                 p.mPos[1] = m.y;
                 p.mPos[2] = m.z;
                 kdt.addPoint(p);
+#if REPORT_TIME
                 Timer tt;
+#endif
                 kdt.buildTree();
+#if REPORT_TIME
                 mTimeRebuildingKdTree+=tt.getElapsedSeconds();
+#endif
             }
+#if REPORT_TIME
             mTimeRandomSampling+=t.getElapsedSeconds();
+#endif
         }
     }
 
@@ -553,6 +778,7 @@ public:
 
     ClusterVector   mClusters;  // Which cluster each source data point is in
     double           mLimitDelta{0.001f};
+#if REPORT_TIME
     double           mTimeInitializing{0};
     double           mTimeClusters{0};
     double           mTimeMeans{0};
@@ -560,6 +786,7 @@ public:
     double           mTimeClosestDistances{0};
     double           mTimeRandomSampling{0};
     double           mTimeRebuildingKdTree{0};
+#endif
 };
 
 Kmeans *Kmeans::create(void)
