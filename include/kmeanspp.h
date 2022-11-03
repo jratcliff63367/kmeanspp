@@ -261,7 +261,7 @@ namespace kmeans
 {
 
 // Process 128 points per thread
-#define PARALLEL_FOR_CHUNK_SIZE 128
+#define PARALLEL_FOR_CHUNK_SIZE 256
 
 class ParallelFor
 {
@@ -585,7 +585,7 @@ public:
     {
         if (params.mUseThreading )
         {
-            mThreadPool = new threadpool::ThreadPool(8);
+            mThreadPool = new threadpool::ThreadPool(22);
         }
 
         uint32_t maxPlusPlusCount = params.mMaximumPlusPlusCount;
