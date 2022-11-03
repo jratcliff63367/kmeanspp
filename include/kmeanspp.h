@@ -1,8 +1,9 @@
 #pragma once
 
 #include <stdint.h>
+#include "threadpool.h"
 
-#define REPORT_TIME 0
+#define REPORT_TIME 1
 
 namespace kmeans
 {
@@ -21,6 +22,7 @@ public:
         uint32_t     mMaximumPlusPlusCount{0};
         uint32_t     mMaxIterations{100};
         bool        mUseKdTree{true}; // you would always want this to true unless trying to debug something
+        bool        mUseThreading{true};
     };
     static Kmeans *create(void);
 
@@ -258,6 +260,19 @@ private:
 namespace kmeans
 {
 
+// Process 128 points per thread
+#define PARALLEL_FOR_CHUNK_SIZE 128
+
+class ParallelFor
+{
+public:
+    uint32_t    mStartIndex{0};
+    uint32_t    mStopIndex{0};
+    std::future<void> mFuture;
+};
+
+using ParallelForVector = std::vector< ParallelFor >;
+
 class RandPool
 {
 public:
@@ -472,6 +487,9 @@ public:
 #endif
         } while ( count < params.mMaxIterations );
 
+        delete mThreadPool;
+        mThreadPool = nullptr;
+
         resultPointCount = mK;
         ret = &mMeans[0].x;
 #if REPORT_TIME
@@ -565,6 +583,11 @@ public:
 
     void initializeClusters(const Parameters &params)
     {
+        if (params.mUseThreading )
+        {
+            mThreadPool = new threadpool::ThreadPool(8);
+        }
+
         uint32_t maxPlusPlusCount = params.mMaximumPlusPlusCount;
         if ( maxPlusPlusCount < params.mMaxPoints )
         {
@@ -589,22 +612,38 @@ public:
             return;
         }
         uint32_t dataSize = uint32_t(mData.size());
-        Point3Vector data;
         if ( maxPlusPlusCount != dataSize )
         {
-            data.resize(maxPlusPlusCount);
+            mReducedData.resize(maxPlusPlusCount);
             RandPool rp(dataSize);
             for (uint32_t i=0; i<maxPlusPlusCount; i++)
             {
                 bool shuffled;
                 uint32_t index = rp.get(shuffled);
-                data[i] = mData[index];
+                mReducedData[i] = mData[index];
             }
         }
         else
         {
-            data = mData;
+            mReducedData = mData;
         }
+        if ( mThreadPool )
+        {
+            uint32_t dcount = uint32_t(mReducedData.size());
+            uint32_t chunkCount = (dcount + PARALLEL_FOR_CHUNK_SIZE - 1) / PARALLEL_FOR_CHUNK_SIZE;
+            mParallelFor.resize(chunkCount);
+            for (uint32_t i = 0; i < chunkCount; i++)
+            {
+                ParallelFor &p = mParallelFor[i];
+                p.mStartIndex = i * PARALLEL_FOR_CHUNK_SIZE;
+                p.mStopIndex = p.mStartIndex + (PARALLEL_FOR_CHUNK_SIZE - 1);
+                if (p.mStopIndex >= dcount)
+                {
+                    p.mStopIndex = dcount - 1;
+                }
+            }
+        }
+
         std::random_device rand_device;
         uint64_t seed = 0; //rand_device();
         // Using a very simple PRBS generator, parameters selected according to
@@ -612,26 +651,26 @@ public:
         std::linear_congruential_engine<uint64_t, 6364136223846793005, 1442695040888963407, UINT64_MAX> rand_engine(seed);
         // Select first mean at random from the set
         {
-            std::uniform_int_distribution<size_t> uniform_generator(0, data.size() - 1);
+            std::uniform_int_distribution<size_t> uniform_generator(0, mReducedData.size() - 1);
             size_t rindex = uniform_generator(rand_engine);
-            mMeans.push_back(data[rindex]);
+            mMeans.push_back(mReducedData[rindex]);
         }
-        kdtree::KdTree kdt;
         if ( params.mUseKdTree )
         {
-            kdt.reservePoints(mK);
+            mKdTree = new kdtree::KdTree;
+            mKdTree->reservePoints(mK);
             kdtree::KdPoint p;
             const auto &m = mMeans[0];
             p.mId = 0;
             p.mPos[0] = m.x;
             p.mPos[1] = m.y;
             p.mPos[2] = m.z;
-            kdt.addPoint(p);
-            kdt.buildTree();
+            mKdTree->addPoint(p);
+            mKdTree->buildTree();
         }
 
-        DistanceVector distances;
-        distances.resize(data.size());
+        mDistances.resize(mReducedData.size());
+
         for (uint32_t count = 1; count < mK; ++count) 
         {
 #if REPORT_TIME
@@ -640,20 +679,20 @@ public:
             // Calculate the distance to the closest mean for each data point
             if ( params.mUseKdTree )
             {
-                closestDistance(kdt, data, distances);
+                closestDistanceKdTree();
             }
             else
             {
-                closestDistance(mMeans, data, distances);
+                closestDistance();
             }
 #if REPORT_TIME
             mTimeClosestDistances+=t.getElapsedSeconds();
 #endif
             // Pick a random point weighted by the distance from existing means
             // TODO: This might convert floating point weights to ints, distorting the distribution for small weights
-            std::discrete_distribution<size_t> generator(distances.begin(), distances.end());
+            std::discrete_distribution<size_t> generator(mDistances.begin(), mDistances.end());
             uint32_t index = (uint32_t)mMeans.size();
-            mMeans.push_back(data[generator(rand_engine)]);
+            mMeans.push_back(mReducedData[generator(rand_engine)]);
             if ( params.mUseKdTree )
             {
                 kdtree::KdPoint p;
@@ -662,11 +701,11 @@ public:
                 p.mPos[0] = m.x;
                 p.mPos[1] = m.y;
                 p.mPos[2] = m.z;
-                kdt.addPoint(p);
+                mKdTree->addPoint(p);
 #if REPORT_TIME
                 Timer tt;
 #endif
-                kdt.buildTree();
+                mKdTree->buildTree();
 #if REPORT_TIME
                 mTimeRebuildingKdTree+=tt.getElapsedSeconds();
 #endif
@@ -675,39 +714,90 @@ public:
             mTimeRandomSampling+=t.getElapsedSeconds();
 #endif
         }
+        delete mKdTree;
+        mKdTree = nullptr;
     }
 
-    void closestDistance(const Point3Vector &means,
-                         const Point3Vector &data,
-                         DistanceVector &distances) 
+    void closestDistance(void)
     {
-        uint32_t index = 0;
-        for (auto& d : data) 
+        if ( mThreadPool )
         {
-            float closest = FLT_MAX;
-            for (auto& m : means) 
+            for (auto &p:mParallelFor)
             {
-                float distance = d.distanceSquared(m);
-                if (distance < closest)
+                ParallelFor *pf = &p;
+                p.mFuture = mThreadPool->enqueue([this,pf]
                 {
-                    closest = distance;
-                }
+                    for (uint32_t i=pf->mStartIndex; i<=pf->mStopIndex; i++)
+                    {
+                        float closest = FLT_MAX;
+                        for (auto& m : mMeans)
+                        {
+                            float distance = mReducedData[i].distanceSquared(m);
+                            if (distance < closest)
+                            {
+                                closest = distance;
+                            }
+                        }
+                        mDistances[i] = closest;
+                    }
+                });
             }
-            distances[index] = closest;
-            index++;
+            for (auto &p : mParallelFor)
+            {
+                p.mFuture.get();
+            }
+        }
+        else
+        {
+            uint32_t index = 0;
+            for (auto& d : mReducedData) 
+            {
+                float closest = FLT_MAX;
+                for (auto& m : mMeans) 
+                {
+                    float distance = d.distanceSquared(m);
+                    if (distance < closest)
+                    {
+                        closest = distance;
+                    }
+                }
+                mDistances[index] = closest;
+                index++;
+            }
         }
     }
 
-    void closestDistance(kdtree::KdTree &kdt,
-        const Point3Vector &data,
-        DistanceVector &distances)
+    void closestDistanceKdTree(void)
     {
-        uint32_t index = 0;
-        for (auto& d : data)
+        if (mThreadPool)
         {
-            kdtree::KdPoint p(d.x,d.y,d.z),r;
-            distances[index] = kdt.findNearest(p,r);
-            index++;
+            for (auto &p : mParallelFor)
+            {
+                ParallelFor *pf = &p;
+                p.mFuture = mThreadPool->enqueue([this, pf]
+                {
+                    for (uint32_t i = pf->mStartIndex; i <= pf->mStopIndex; i++)
+                    {
+                        const auto &d = mReducedData[i];
+                        kdtree::KdPoint p(d.x, d.y, d.z), r;
+                        mDistances[i] = mKdTree->findNearest(p, r);
+                    }
+                });
+            }
+            for (auto &p : mParallelFor)
+            {
+                p.mFuture.get();
+            }
+        }
+        else
+        {
+            uint32_t index = 0;
+            for (auto& d : mReducedData)
+            {
+                kdtree::KdPoint p(d.x,d.y,d.z),r;
+                mDistances[index] = mKdTree->findNearest(p,r);
+                index++;
+            }
         }
     }
 #endif
@@ -769,15 +859,22 @@ public:
 
     uint32_t        mK{32};     // Maximum number of mean values to produce
     Point3Vector    mData;      // Input data
+    Point3Vector    mReducedData;      // Input data
 
     Point3          *mCurrentMeans{nullptr};
     Point3          *mOldMeans{nullptr};
     Point3          *mOldOldMeans{nullptr};
 
+    DistanceVector  mDistances;
     Point3Vector    mMeans;     // Means
 
     ClusterVector   mClusters;  // Which cluster each source data point is in
     double           mLimitDelta{0.001f};
+
+    kdtree::KdTree      *mKdTree{nullptr};
+    threadpool::ThreadPool *mThreadPool{nullptr};
+    ParallelForVector   mParallelFor;
+
 #if REPORT_TIME
     double           mTimeInitializing{0};
     double           mTimeClusters{0};

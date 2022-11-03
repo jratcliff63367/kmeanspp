@@ -32,7 +32,9 @@ int main(int argc,const char **argv)
         p.mPoints = points;
         p.mPointCount = pointCount;
         p.mMaxPoints = 2000;
-        p.mMaximumPlusPlusCount = p.mMaxPoints*4;
+        p.mMaximumPlusPlusCount = pointCount; // p.mMaxPoints*4;
+        p.mUseKdTree = true;
+        p.mUseThreading = true;
         const float *results = kpp->compute(p, resultPointCount);
     }
     kpp->release();
