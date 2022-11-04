@@ -2,6 +2,10 @@
 
 #include <stdint.h>
 
+#ifdef _MSC_VER
+#pragma warning(disable:4996)
+#endif
+
 namespace threadpool
 {
     class ThreadPool;
@@ -103,6 +107,57 @@ protected:
 #include <mutex>
 #include <queue>
 #include <thread>
+
+namespace timer
+{
+    class Timer
+    {
+    public:
+        Timer() : mStartTime(std::chrono::high_resolution_clock::now())
+        {
+        }
+
+        void reset()
+        {
+            mStartTime = std::chrono::high_resolution_clock::now();
+        }
+
+        double getElapsedSeconds()
+        {
+            auto s = peekElapsedSeconds();
+            reset();
+            return s;
+        }
+
+        double peekElapsedSeconds()
+        {
+            auto now = std::chrono::high_resolution_clock::now();
+            std::chrono::duration<double> diff = now - mStartTime;
+            return diff.count();
+        }
+
+    private:
+        std::chrono::time_point<std::chrono::high_resolution_clock> mStartTime;
+    };
+
+
+    class ScopedTime
+    {
+    public:
+        ScopedTime(const char *action) : mAction(action)
+        {
+            mTimer.reset();
+        }
+        ~ScopedTime(void)
+        {
+            double dtime = mTimer.getElapsedSeconds();
+            printf("%s took %0.5f seconds\n", mAction, dtime);
+        }
+
+        const char *mAction{ nullptr };
+        Timer       mTimer;
+    };
+}
 
 namespace threadpool
 {
@@ -415,6 +470,61 @@ private:
 
 }
 
+namespace randpool
+{
+    class RandPool
+    {
+    public:
+        RandPool(uint32_t size, uint32_t seed) // size of random number bool.
+        {
+            srand(seed);
+            mData = new uint32_t[size];
+            mSize = size;
+            mTop = mSize;
+            for (uint32_t i = 0; i < mSize; i++)
+            {
+                mData[i] = i;
+            }
+        }
+
+        ~RandPool(void)
+        {
+            delete[]mData;
+        };
+
+        // pull a number from the random number pool, will never return the
+        // same number twice until the 'deck' (pool) has been exhausted.
+        // Will set the shuffled flag to true if the deck/pool was exhausted
+        // on this call.
+        uint32_t get(bool& shuffled)
+        {
+            if (mTop == 0) // deck exhausted, shuffle deck.
+            {
+                shuffled = true;
+                mTop = mSize;
+            }
+            else
+            {
+                shuffled = false;
+            }
+            uint32_t entry = rand() % mTop;
+            mTop--;
+            uint32_t ret = mData[entry]; // swap top of pool with entry
+            mData[entry] = mData[mTop]; // returned
+            mData[mTop] = ret;
+            return ret;
+        };
+
+
+    private:
+        uint32_t* mData; // random number bool.
+        uint32_t mSize; // size of random number pool.
+        uint32_t mTop; // current top of the random number pool.
+    };
+
+
+}
+
 namespace kmeans
 {
 
@@ -431,85 +541,6 @@ public:
 
 using ParallelForVector = std::vector< ParallelFor >;
 
-class RandPool
-{
-public:
-    RandPool(uint32_t size,uint32_t seed) // size of random number bool.
-    {
-        srand(seed);
-        mData = new uint32_t[size];
-        mSize = size;
-        mTop = mSize;
-        for (uint32_t i = 0; i < mSize; i++)
-        {
-            mData[i] = i;
-        }
-    }
-
-    ~RandPool(void)
-    {
-        delete []mData;
-    };
-
-    // pull a number from the random number pool, will never return the
-    // same number twice until the 'deck' (pool) has been exhausted.
-    // Will set the shuffled flag to true if the deck/pool was exhausted
-    // on this call.
-    uint32_t get(bool& shuffled)
-    {
-        if (mTop == 0) // deck exhausted, shuffle deck.
-        {
-            shuffled = true;
-            mTop = mSize;
-        }
-        else
-        {
-            shuffled = false;
-        }
-        uint32_t entry = rand() % mTop;
-        mTop--;
-        uint32_t ret = mData[entry]; // swap top of pool with entry
-        mData[entry] = mData[mTop]; // returned
-        mData[mTop] = ret;
-        return ret;
-    };
-
-
-private:
-    uint32_t* mData; // random number bool.
-    uint32_t mSize; // size of random number pool.
-    uint32_t mTop; // current top of the random number pool.
-};
-
-class Timer
-{
-public:
-    Timer() : mStartTime(std::chrono::high_resolution_clock::now())
-    {
-    }
-
-    void reset()
-    {
-        mStartTime = std::chrono::high_resolution_clock::now();
-    }
-
-    double getElapsedSeconds()
-    {
-        auto s = peekElapsedSeconds();
-        reset();
-        return s;
-    }
-
-    double peekElapsedSeconds()
-    {
-        auto now = std::chrono::high_resolution_clock::now();
-        std::chrono::duration<double> diff = now - mStartTime;
-        return diff.count();
-    }
-
-private:
-    std::chrono::time_point<std::chrono::high_resolution_clock> mStartTime;
-};
 
 
 class Point3
@@ -581,7 +612,7 @@ public:
         mData.resize(params.mPointCount);
         memcpy(&mData[0],params.mPoints,sizeof(float)*3*params.mPointCount);
         {
-            Timer t;
+            timer::Timer t;
             initializeClusters(params);
             mTimeInitializing = t.getElapsedSeconds();
         }
@@ -602,11 +633,11 @@ public:
         do 
         {
             {
-                Timer t;
-                calculateClusters(params.mUseKdTree,msize);
+                timer::Timer t;
+                calculateClusters(mCurrentMeans,msize,params.mUseKdTree);
                 mTimeClusters+=t.getElapsedSeconds();
             }
-            Timer t;
+            timer::Timer t;
             // Pointer swap, the current means is now the old means.
             // The old means is now the old-old means
             // And the old old means pointer now becomes the current means pointer
@@ -616,9 +647,10 @@ public:
             mCurrentMeans = temp;
 
             calculateMeans(mCurrentMeans,msize,mOldMeans);
+
             mTimeMeans+=t.getElapsedSeconds();
             count++;
-            Timer tm;
+            timer::Timer tm;
             if ( sameMeans(mCurrentMeans,mOldMeans,msize))
             {
                 break;
@@ -739,7 +771,7 @@ public:
         {
             mMeans.clear();
             mMeans.resize(maxPlusPlusCount);
-            RandPool rp(params.mPointCount,uint32_t(mParams.mRandomSeed));
+            randpool::RandPool rp(params.mPointCount,uint32_t(mParams.mRandomSeed));
             for (uint32_t i=0; i<maxPlusPlusCount; i++)
             {
                 bool shuffled;
@@ -753,7 +785,7 @@ public:
         if ( maxPlusPlusCount != dataSize )
         {
             mReducedData.resize(maxPlusPlusCount);
-            RandPool rp(dataSize,uint32_t(mParams.mRandomSeed));
+            randpool::RandPool rp(dataSize,uint32_t(mParams.mRandomSeed));
             for (uint32_t i=0; i<maxPlusPlusCount; i++)
             {
                 bool shuffled;
@@ -811,7 +843,7 @@ public:
 
         for (uint32_t count = 1; count < mK; ++count) 
         {
-            Timer t;
+            timer::Timer t;
             // Calculate the distance to the closest mean for each data point
             if ( params.mUseKdTree )
             {
@@ -836,7 +868,7 @@ public:
                 p.mPos[1] = m.y;
                 p.mPos[2] = m.z;
                 mKdTree->addPoint(p);
-                Timer tt;
+                timer::Timer tt;
                 mKdTree->buildTree();
                 mTimeRebuildingKdTree+=tt.getElapsedSeconds();
             }
@@ -932,7 +964,7 @@ public:
     }
 #endif
 
-    void calculateClusters(bool useKdTree,size_t msize)
+    void calculateClusters(const Point3 *means,size_t msize,bool useKdTree)
     {
         if ( useKdTree )
         {
@@ -940,7 +972,7 @@ public:
             kdt.reservePoints(msize);
             for (uint32_t i=0; i<msize; i++)
             {
-                const auto &p = mMeans[i];
+                const auto &p = means[i];
                 kdtree::KdPoint kp;
                 kp.mPos[0] = p.x;
                 kp.mPos[1] = p.y;
@@ -949,35 +981,107 @@ public:
                 kdt.addPoint(kp);
             }
             kdt.buildTree();
-            for (size_t i = 0; i < mData.size(); i++)
+            if (getThreadPool())
             {
-                const auto &p = mData[i];
-                kdtree::KdPoint kp;
-                kp.mPos[0] = p.x;
-                kp.mPos[1] = p.y;
-                kp.mPos[2] = p.z;
-                kdtree::KdPoint result;
-                kdt.findNearest(kp,result);
-                assert( result.mId < msize );
-                mClusters[i] = result.mId;
+                auto tp = getThreadPool();
+                kdtree::KdTree *kdtp = &kdt;
+                for (auto &p : mParallelFor)
+                {
+                    ParallelFor *pf = &p;
+                    p.mFuture = tp->enqueue([this, pf, kdtp]
+                    {
+                        for (uint32_t i = pf->mStartIndex; i <= pf->mStopIndex; i++)
+                        {
+                            const auto &p = mData[i];
+                            kdtree::KdPoint kp;
+                            kp.mPos[0] = p.x;
+                            kp.mPos[1] = p.y;
+                            kp.mPos[2] = p.z;
+                            kdtree::KdPoint result;
+                            kdtp->findNearest(kp, result);
+                            mClusters[i] = result.mId;
+                        }
+                    });
+                }
+                for (auto &p : mParallelFor)
+                {
+                    p.mFuture.get();
+                }
+            }
+            else
+            {
+                for (size_t i = 0; i < mData.size(); i++)
+                {
+                    const auto &p = mData[i];
+                    kdtree::KdPoint kp;
+                    kp.mPos[0] = p.x;
+                    kp.mPos[1] = p.y;
+                    kp.mPos[2] = p.z;
+                    kdtree::KdPoint result;
+                    kdt.findNearest(kp, result);
+                    assert(result.mId < msize);
+                    uint32_t cid = closestMean(means, msize, mData[i]);
+                    if ( cid != result.mId )
+                    {
+                        static FILE *fph=nullptr;
+                        if ( fph == nullptr )
+                        {
+                            fph = fopen("kdtree.bin", "wb");
+                            uint32_t m = uint32_t(msize);
+                            fwrite(&m,sizeof(m),1,fph);
+                            for (uint32_t i=0; i<m; i++)
+                            {
+                                const Point3 &p = means[i];
+                                fwrite(&p,sizeof(p),1,fph);
+                            }
+                            fflush(fph);
+                        }
+                        Point3 &pf = mData[i];
+                        fwrite(&pf,sizeof(Point3),1,fph);
+                        fflush(fph);
+                    }
+                    mClusters[i] = result.mId;
+                }
             }
         }
         else
         {
-            for (size_t i=0; i<mData.size(); i++)
+            if ( getThreadPool() )
             {
-                mClusters[i] = closestMean(mData[i]);
+                auto tp = getThreadPool();
+                for (auto &p:mParallelFor)
+                {
+                    ParallelFor *pf = &p;
+                    p.mFuture = tp->enqueue([this, pf, means, msize]
+                    {
+                        for (uint32_t i = pf->mStartIndex; i <= pf->mStopIndex; i++)
+                        {
+                            mClusters[i] = closestMean(means,msize,mData[i]);
+                        }
+                    });
+                }
+                for (auto &p : mParallelFor)
+                {
+                    p.mFuture.get();
+                }
+            }
+            else
+            {
+                for (size_t i=0; i<mData.size(); i++)
+                {
+                    mClusters[i] = closestMean(means,msize,mData[i]);
+                }
             }
         }
     }
 
-    uint32_t closestMean(const Point3 &p) const
+    uint32_t closestMean(const Point3 *means,size_t msize,const Point3 &p) const
     {
         uint32_t ret = 0;
         float closest = FLT_MAX;
-        for (uint32_t i=0; i<mK; i++)
+        for (uint32_t i=0; i<msize; i++)
         {
-            float d2 = p.distanceSquared(mMeans[i]);
+            float d2 = p.distanceSquared(means[i]);
             if ( d2 < closest )
             {
                 closest = d2;

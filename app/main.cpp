@@ -9,8 +9,14 @@
 #define ENABLE_KMEANS_IMPLEMENTATION 1
 #include "kmeanspp.h"
 
-void testKmeans(uint32_t pointCount,uint32_t k,bool useKdTree,bool useThreading)
+void testKmeans(uint32_t pointCount,
+                uint32_t k,
+                bool useKdTree,
+                bool useThreading)
 {
+    printf("Running Kmeans: KdTree(%s) Threading(%s)\n",
+        useKdTree ? "true" : "false",
+        useThreading ? "true" : "false");
     float *points = new float[pointCount * 3];
     std::random_device rand_device;
     uint64_t seed = 0; //rand_device();
@@ -31,8 +37,7 @@ void testKmeans(uint32_t pointCount,uint32_t k,bool useKdTree,bool useThreading)
         p.mPoints = points;
         p.mPointCount = pointCount;
         p.mMaxPoints = k;
-        //        p.mMaximumPlusPlusCount = pointCount; // p.mMaxPoints*4;
-        p.mMaximumPlusPlusCount = k;
+        p.mMaximumPlusPlusCount = pointCount;
         p.mShowTimes = true;
         p.mUseKdTree = useKdTree;
         p.mUseThreading = useThreading;
@@ -50,5 +55,11 @@ void testKmeans(uint32_t pointCount,uint32_t k,bool useKdTree,bool useThreading)
 
 int main(int argc,const char **argv)
 {
-    testKmeans(10000,64,false,false);
+//    testKmeans(100000,1000,false,false);
+    //testKmeans(100000,1000,true,false);
+
+    testKmeans(1000,500,true,false);
+
+//    testKmeans(100000,1000,false,true);
+//    testKmeans(100000,1000,true,true);
 }
