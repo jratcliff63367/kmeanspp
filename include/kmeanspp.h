@@ -16,19 +16,52 @@ public:
     class Parameters
     {
     public:
-        const float *mPoints{nullptr};
-        uint32_t     mPointCount{0};
-        uint32_t     mMaxPoints{0}; // maximum number of output points
-        // If this is the same size as max-points then we just
-        // do a random distribution and bypass the kmeans++ computation
+        const float *mPoints{nullptr};  // A point to a set of 3d data points in X/Y/Z format
+        uint32_t     mPointCount{0};    // The total number of input points
+        uint32_t     mMaxPoints{0};     // The maximum number of output points
+        // The Kmeans++ algorithm does a very CPU intensive task to get the
+        // initial cluster values. By default it uses *all* of the input points
+        // to calculate this. However, the number of input points could easily be
+        // in the millions and this makes the initialization phase take an extremely
+        // long time.
+        // You can assign 'mmMaximumPlusPlusCount' in the following ways:
+        //
+        // * If it is less than or equal to the mMaxPoints it will *disable* the
+        // * Kmeans++ initialization phase and instead just sample 'mMaxPoints' number
+        // * of input points as the initial cluster values.
+        //
+        // * If it is exactly equal to 'mPointCount' count then it will do the standard
+        // * kmeans++ computation which considers *all* of the input points.
+        //
+        // * If the value is greater than 'mMaxPoints' but less than 'mPointCount' it
+        // * will still run the Kmeans++ clustering computation but on a smaller subset
+        // * of data points. This is a good compromise to get the benefits of the Kmeans++ 
+        // * initialization while not destroying performance by considering all points.
         uint32_t     mMaximumPlusPlusCount{0};
+        // The maximum number of iterations to perform before giving up.
+        // Usually Kmeans++ converges in far less than a 100 iterations so this
+        // is kind of an emergency out if it ever failed to converge
         uint32_t     mMaxIterations{100};
+        // The user provides a random number seed to use. The reason for this 
+        // is that for the purposes of testing and validation we want to be able
+        // to get the same results for the same set of input data each time.
+        // For your own purposes you can change the random number seed if you prefer.
         uint32_t    mRandomSeed{0};
+        // By default we use a KdTree to speed up the distance computations.
+        // The only reason to disable this is for testing purposes.
         bool        mUseKdTree{true}; // you would always want this to true unless trying to debug something
+        // By default multi-threading should be enabled as it provides an order of
+        // magnitude performance increase on hyperthreaded machines. The only reason
+        // to disable it would be for testing and debugging purposes.
         bool        mUseThreading{true};
-        uint32_t    mThreadCount{22}; // On hyperthreaded machines 22 threads seems to be a sweet spot
-        threadpool::ThreadPool *mThreadPool{nullptr}; // If the caller is providing their own instance of the thread pool
-        bool        mShowTimes{false}; // a debugging feature to report times spent in the various parts of the algorithm
+        // On hyperthreaded machines 22 threads seems to be a sweet spot. 
+        // If you want to use fewer threads, just change this value
+        uint32_t    mThreadCount{22}; 
+        // If the user provides a pointer to an instance of the ThreadPool class
+        // then it will be used rather than creating a unique instance of one.
+        threadpool::ThreadPool *mThreadPool{nullptr};
+        // a debugging feature to report times spent in the various parts of the algorithm
+        bool        mShowTimes{false};
     };
 
     static Kmeans *create(void);

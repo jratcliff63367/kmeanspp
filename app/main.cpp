@@ -32,24 +32,23 @@ void testKmeans(uint32_t pointCount,uint32_t k,bool useKdTree,bool useThreading)
         p.mPointCount = pointCount;
         p.mMaxPoints = k;
         //        p.mMaximumPlusPlusCount = pointCount; // p.mMaxPoints*4;
-        p.mMaximumPlusPlusCount = pointCount;
-
+        p.mMaximumPlusPlusCount = k;
+        p.mShowTimes = true;
         p.mUseKdTree = useKdTree;
         p.mUseThreading = useThreading;
         const float *results = kpp->compute(p, resultPointCount);
+#if 0
         for (uint32_t i=0; i<resultPointCount; i++)
         {
             const float *mp = &results[i*3];
             printf("[%d]=(%0.2f,%0.2f,%0.2f)\n", i+1, mp[0], mp[1], mp[2]);
         }
+#endif
     }
     kpp->release();
 }
 
 int main(int argc,const char **argv)
 {
-    testKmeans(1000,32,false,false);
-//    testKmeans(1000,32,true,false);
-//    testKmeans(1000, 32, false, true);
-    testKmeans(1000, 32, true, true);
+    testKmeans(10000,64,false,false);
 }
