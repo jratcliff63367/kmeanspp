@@ -1,9 +1,11 @@
 #pragma once
 
 #include <stdint.h>
-#include "threadpool.h"
 
-#define REPORT_TIME 1
+namespace threadpool
+{
+    class ThreadPool;
+}
 
 namespace kmeans
 {
@@ -21,9 +23,14 @@ public:
         // do a random distribution and bypass the kmeans++ computation
         uint32_t     mMaximumPlusPlusCount{0};
         uint32_t     mMaxIterations{100};
+        uint32_t    mRandomSeed{0};
         bool        mUseKdTree{true}; // you would always want this to true unless trying to debug something
         bool        mUseThreading{true};
+        uint32_t    mThreadCount{22}; // On hyperthreaded machines 22 threads seems to be a sweet spot
+        threadpool::ThreadPool *mThreadPool{nullptr}; // If the caller is providing their own instance of the thread pool
+        bool        mShowTimes{false}; // a debugging feature to report times spent in the various parts of the algorithm
     };
+
     static Kmeans *create(void);
 
     virtual const float *compute(const Parameters &params,uint32_t &resultPointCount) = 0;
@@ -55,6 +62,124 @@ protected:
 #include <type_traits>
 #include <vector>
 #include <chrono>
+#include <array>
+#include <atomic>
+#include <condition_variable>
+#include <deque>
+#include <future>
+#include <mutex>
+#include <queue>
+#include <thread>
+
+namespace threadpool
+{
+
+    class ThreadPool {
+    public:
+        ThreadPool();
+        ThreadPool(int worker);
+        ~ThreadPool();
+        template<typename F, typename... Args>
+        auto enqueue(F&& f, Args&& ... args)
+#ifndef __cpp_lib_is_invocable
+            ->std::future< typename std::result_of< F(Args...) >::type>;
+#else
+            ->std::future< typename std::invoke_result_t<F, Args...>>;
+#endif
+    private:
+        std::vector<std::thread> workers;
+        std::deque<std::function<void()>> tasks;
+        std::mutex task_mutex;
+        std::condition_variable cv;
+        bool closed;
+        int count;
+    };
+
+    ThreadPool::ThreadPool()
+        : ThreadPool(1)
+    {
+    }
+
+    ThreadPool::ThreadPool(int worker)
+        : closed(false)
+        , count(0)
+    {
+        workers.reserve(worker);
+        for (int i = 0; i < worker; i++)
+        {
+            workers.emplace_back(
+                [this]
+            {
+                std::unique_lock<std::mutex> lock(this->task_mutex);
+                while (true)
+                {
+                    while (this->tasks.empty())
+                    {
+                        if (this->closed)
+                        {
+                            return;
+                        }
+                        this->cv.wait(lock);
+                    }
+                    auto task = this->tasks.front();
+                    this->tasks.pop_front();
+                    lock.unlock();
+                    task();
+                    lock.lock();
+                }
+            }
+            );
+        }
+    }
+
+    template<typename F, typename... Args>
+    auto ThreadPool::enqueue(F&& f, Args&& ... args)
+#ifndef __cpp_lib_is_invocable
+        -> std::future< typename std::result_of< F(Args...) >::type>
+#else
+        -> std::future< typename std::invoke_result_t<F, Args...>>
+#endif
+    {
+
+#ifndef __cpp_lib_is_invocable
+        using return_type = typename std::result_of< F(Args...) >::type;
+#else
+        using return_type = typename std::invoke_result_t< F, Args... >;
+#endif
+        auto task = std::make_shared<std::packaged_task<return_type()> >(
+            std::bind(std::forward<F>(f), std::forward<Args>(args)...)
+            );
+        auto result = task->get_future();
+
+        {
+            std::unique_lock<std::mutex> lock(task_mutex);
+            if (!closed)
+            {
+                tasks.emplace_back([task]
+                {
+                    (*task)();
+                });
+                cv.notify_one();
+            }
+        }
+
+        return result;
+    }
+
+    ThreadPool::~ThreadPool() {
+        {
+            std::unique_lock<std::mutex> lock(task_mutex);
+            closed = true;
+        }
+        cv.notify_all();
+        for (auto && worker : workers)
+        {
+            worker.join();
+        }
+    }
+
+
+}
 
 namespace kdtree
 {
@@ -276,8 +401,9 @@ using ParallelForVector = std::vector< ParallelFor >;
 class RandPool
 {
 public:
-    RandPool(uint32_t size) // size of random number bool.
+    RandPool(uint32_t size,uint32_t seed) // size of random number bool.
     {
+        srand(seed);
         mData = new uint32_t[size];
         mSize = size;
         mTop = mSize;
@@ -322,7 +448,6 @@ private:
     uint32_t mTop; // current top of the random number pool.
 };
 
-#if REPORT_TIME
 class Timer
 {
 public:
@@ -352,7 +477,6 @@ public:
 private:
     std::chrono::time_point<std::chrono::high_resolution_clock> mStartTime;
 };
-#endif
 
 
 class Point3
@@ -404,6 +528,8 @@ public:
     {
         const float *ret = nullptr;
 
+        mParams = params;
+
         mK = params.mMaxPoints;
         mMeans.clear();
         mMeans.reserve(mK);
@@ -422,13 +548,9 @@ public:
         mData.resize(params.mPointCount);
         memcpy(&mData[0],params.mPoints,sizeof(float)*3*params.mPointCount);
         {
-#if REPORT_TIME
             Timer t;
-#endif
             initializeClusters(params);
-#if REPORT_TIME
             mTimeInitializing = t.getElapsedSeconds();
-#endif
         }
         uint32_t count = 0;
         // Resize the means container to have room for
@@ -447,17 +569,11 @@ public:
         do 
         {
             {
-#if REPORT_TIME
                 Timer t;
-#endif
                 calculateClusters(params.mUseKdTree,msize);
-#if REPORT_TIME
                 mTimeClusters+=t.getElapsedSeconds();
-#endif
             }
-#if REPORT_TIME
             Timer t;
-#endif
             // Pointer swap, the current means is now the old means.
             // The old means is now the old-old means
             // And the old old means pointer now becomes the current means pointer
@@ -467,13 +583,9 @@ public:
             mCurrentMeans = temp;
 
             calculateMeans(mCurrentMeans,msize,mOldMeans);
-#if REPORT_TIME
             mTimeMeans+=t.getElapsedSeconds();
-#endif
             count++;
-#if REPORT_TIME
             Timer tm;
-#endif
             if ( sameMeans(mCurrentMeans,mOldMeans,msize))
             {
                 break;
@@ -482,26 +594,24 @@ public:
             {
                 break;
             }
-#if REPORT_TIME
             mTimeTermination+=tm.getElapsedSeconds();
-#endif
         } while ( count < params.mMaxIterations );
 
-        delete mThreadPool;
-        mThreadPool = nullptr;
+        releaseThreadPool();
 
         resultPointCount = mK;
         ret = &mMeans[0].x;
-#if REPORT_TIME
-        printf("Ran             : %d iterations.\n",count);
-        printf("TimeInitializing: %0.2f seconds\n",mTimeInitializing);
-        printf("ClosestDistances: %0.2f seconds\n",mTimeClosestDistances);
-        printf("RandomSampling:   %0.2f seconds\n",mTimeRandomSampling);
-        printf("BuildingKdTree:   %0.2f seconds\n",mTimeRebuildingKdTree);
-        printf("TimeClusters:     %0.2f seconds\n",mTimeClusters);
-        printf("TimeMeans:        %0.2f seconds\n",mTimeMeans);
-        printf("TimeTermination:  %0.2f seconds\n",mTimeTermination);
-#endif
+        if ( mParams.mShowTimes )
+        {
+            printf("Ran             : %d iterations.\n",count);
+            printf("TimeInitializing: %0.2f seconds\n",mTimeInitializing);
+            printf("ClosestDistances: %0.2f seconds\n",mTimeClosestDistances);
+            printf("RandomSampling:   %0.2f seconds\n",mTimeRandomSampling);
+            printf("BuildingKdTree:   %0.2f seconds\n",mTimeRebuildingKdTree);
+            printf("TimeClusters:     %0.2f seconds\n",mTimeClusters);
+            printf("TimeMeans:        %0.2f seconds\n",mTimeMeans);
+            printf("TimeTermination:  %0.2f seconds\n",mTimeTermination);
+        }
         return ret;
     }
 
@@ -583,11 +693,6 @@ public:
 
     void initializeClusters(const Parameters &params)
     {
-        if (params.mUseThreading )
-        {
-            mThreadPool = new threadpool::ThreadPool(22);
-        }
-
         uint32_t maxPlusPlusCount = params.mMaximumPlusPlusCount;
         if ( maxPlusPlusCount < params.mMaxPoints )
         {
@@ -601,7 +706,7 @@ public:
         {
             mMeans.clear();
             mMeans.resize(maxPlusPlusCount);
-            RandPool rp(params.mPointCount);
+            RandPool rp(params.mPointCount,uint32_t(mParams.mRandomSeed));
             for (uint32_t i=0; i<maxPlusPlusCount; i++)
             {
                 bool shuffled;
@@ -615,7 +720,7 @@ public:
         if ( maxPlusPlusCount != dataSize )
         {
             mReducedData.resize(maxPlusPlusCount);
-            RandPool rp(dataSize);
+            RandPool rp(dataSize,uint32_t(mParams.mRandomSeed));
             for (uint32_t i=0; i<maxPlusPlusCount; i++)
             {
                 bool shuffled;
@@ -627,7 +732,7 @@ public:
         {
             mReducedData = mData;
         }
-        if ( mThreadPool )
+        if ( getThreadPool() )
         {
             uint32_t dcount = uint32_t(mReducedData.size());
             uint32_t chunkCount = (dcount + PARALLEL_FOR_CHUNK_SIZE - 1) / PARALLEL_FOR_CHUNK_SIZE;
@@ -645,7 +750,7 @@ public:
         }
 
         std::random_device rand_device;
-        uint64_t seed = 0; //rand_device();
+        uint64_t seed = mParams.mRandomSeed;
         // Using a very simple PRBS generator, parameters selected according to
         // https://en.wikipedia.org/wiki/Linear_congruential_generator#Parameters_in_common_use
         std::linear_congruential_engine<uint64_t, 6364136223846793005, 1442695040888963407, UINT64_MAX> rand_engine(seed);
@@ -673,9 +778,7 @@ public:
 
         for (uint32_t count = 1; count < mK; ++count) 
         {
-#if REPORT_TIME
             Timer t;
-#endif
             // Calculate the distance to the closest mean for each data point
             if ( params.mUseKdTree )
             {
@@ -685,9 +788,7 @@ public:
             {
                 closestDistance();
             }
-#if REPORT_TIME
             mTimeClosestDistances+=t.getElapsedSeconds();
-#endif
             // Pick a random point weighted by the distance from existing means
             // TODO: This might convert floating point weights to ints, distorting the distribution for small weights
             std::discrete_distribution<size_t> generator(mDistances.begin(), mDistances.end());
@@ -702,17 +803,11 @@ public:
                 p.mPos[1] = m.y;
                 p.mPos[2] = m.z;
                 mKdTree->addPoint(p);
-#if REPORT_TIME
                 Timer tt;
-#endif
                 mKdTree->buildTree();
-#if REPORT_TIME
                 mTimeRebuildingKdTree+=tt.getElapsedSeconds();
-#endif
             }
-#if REPORT_TIME
             mTimeRandomSampling+=t.getElapsedSeconds();
-#endif
         }
         delete mKdTree;
         mKdTree = nullptr;
@@ -720,12 +815,13 @@ public:
 
     void closestDistance(void)
     {
-        if ( mThreadPool )
+        if ( getThreadPool() )
         {
+            auto tp = getThreadPool();
             for (auto &p:mParallelFor)
             {
                 ParallelFor *pf = &p;
-                p.mFuture = mThreadPool->enqueue([this,pf]
+                p.mFuture = tp->enqueue([this,pf]
                 {
                     for (uint32_t i=pf->mStartIndex; i<=pf->mStopIndex; i++)
                     {
@@ -769,12 +865,13 @@ public:
 
     void closestDistanceKdTree(void)
     {
-        if (mThreadPool)
+        if (getThreadPool())
         {
+            auto tp = getThreadPool();
             for (auto &p : mParallelFor)
             {
                 ParallelFor *pf = &p;
-                p.mFuture = mThreadPool->enqueue([this, pf]
+                p.mFuture = tp->enqueue([this, pf]
                 {
                     for (uint32_t i = pf->mStartIndex; i <= pf->mStopIndex; i++)
                     {
@@ -857,6 +954,24 @@ public:
         return ret;
     }
 
+    threadpool::ThreadPool *getThreadPool(void)
+    {
+        threadpool::ThreadPool *ret = mParams.mThreadPool ? mParams.mThreadPool : mThreadPool;
+
+        if ( !ret && mParams.mUseThreading )
+        {
+            ret = mThreadPool = new threadpool::ThreadPool(mParams.mThreadCount);
+        }
+
+        return ret;
+    }
+
+    void releaseThreadPool(void)
+    {
+        delete mThreadPool;
+        mThreadPool = nullptr;
+    }
+
     uint32_t        mK{32};     // Maximum number of mean values to produce
     Point3Vector    mData;      // Input data
     Point3Vector    mReducedData;      // Input data
@@ -874,8 +989,8 @@ public:
     kdtree::KdTree      *mKdTree{nullptr};
     threadpool::ThreadPool *mThreadPool{nullptr};
     ParallelForVector   mParallelFor;
+    Parameters          mParams;
 
-#if REPORT_TIME
     double           mTimeInitializing{0};
     double           mTimeClusters{0};
     double           mTimeMeans{0};
@@ -883,7 +998,6 @@ public:
     double           mTimeClosestDistances{0};
     double           mTimeRandomSampling{0};
     double           mTimeRebuildingKdTree{0};
-#endif
 };
 
 Kmeans *Kmeans::create(void)
