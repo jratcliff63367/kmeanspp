@@ -272,29 +272,236 @@ namespace threadpool
 namespace kdtree
 {
 
+//****
+/**
+ * Class for representing a point. coordinate_type must be a numeric type.
+ */
+template<typename coordinate_type, size_t dimensions>
+class point 
+{
+public:
+    point(coordinate_type x,coordinate_type y,coordinate_type z)
+    {
+        mCoordinates[0] = x;
+        mCoordinates[1] = y;
+        mCoordinates[2] = z;
+    }
+    point(std::array<coordinate_type, dimensions> c) : mCoordinates(c) 
+    {
+    }
+
+    /**
+     * Returns the coordinate in the given dimension.
+     *
+     * @param index dimension index (zero based)
+     * @return coordinate in the given dimension
+     */
+    coordinate_type get(size_t index) const 
+    {
+        return mCoordinates[index];
+    }
+
+    /**
+     * Returns the distance squared from this point to another
+     * point.
+     *
+     * @param pt another point
+     * @return distance squared from this point to the other point
+     */
+    float distance(const point& pt) const 
+    {
+        float dist = 0;
+        for (size_t i = 0; i < dimensions; ++i) 
+        {
+            float d = get(i) - pt.get(i);
+            dist += d * d;
+        }
+        return dist;
+    }
+
+    void setId(uint32_t id) 
+    {
+        mId = id;
+    }
+    uint32_t getId(void) const
+    {
+        return mId;
+    }
+private:
+    std::array<coordinate_type, dimensions> mCoordinates;
+    uint32_t    mId;
+};
+
+
+
+// Templated implementation of KdTree
+template<typename coordinate_type, size_t dimensions>
+class KdTreeTemplate 
+{
+public:
+    typedef point<coordinate_type, dimensions> point_type;
+private:
+    class KdNode 
+    {
+    public:
+        KdNode(const point_type& pt) : mPoint(pt), mLeft(nullptr), mRight(nullptr) 
+        {
+        }
+        coordinate_type get(size_t index) const 
+        {
+            return mPoint.get(index);
+        }
+
+        float distance(const point_type& pt) const 
+        {
+            return mPoint.distance(pt);
+        }
+
+        point_type mPoint;
+        KdNode* mLeft;
+        KdNode* mRight;
+    };
+
+    class FindNearest
+    {
+    public:
+        KdNode              *mBest = { nullptr };
+        float               mBestDistance{ 0 };
+        size_t              mVisitCount{ 0 };
+    };
+    KdNode              *mRoot{nullptr};
+
+    std::vector<KdNode> mNodes;
+
+    class KdNodeCompare 
+    {
+    public:
+        KdNodeCompare(size_t index) : index_(index) 
+        {
+        }
+
+        bool operator()(const KdNode& n1, const KdNode& n2) const 
+        {
+            return n1.mPoint.get(index_) < n2.mPoint.get(index_);
+        }
+
+        size_t index_;
+    };
+
+    KdNode* buildKdTree(size_t begin, size_t end, size_t index) 
+    {
+        if (end <= begin)
+            return nullptr;
+        size_t n = begin + (end - begin)/2;
+        auto i = mNodes.begin();
+        std::nth_element(i + begin, i + n, i + end, KdNodeCompare(index));
+        index = (index + 1) % dimensions;
+        mNodes[n].mLeft  = buildKdTree(begin, n, index);
+        mNodes[n].mRight = buildKdTree(n + 1, end, index);
+        return &mNodes[n];
+    }
+
+    void nearest(KdNode* root, const point_type& point, size_t index,FindNearest &fn) 
+    {
+        if (root == nullptr)
+            return;
+        ++fn.mVisitCount;
+        float d = root->distance(point);
+        if (fn.mBest == nullptr || d < fn.mBestDistance) 
+        {
+            fn.mBestDistance = d;
+            fn.mBest = root;
+        }
+        if (fn.mBestDistance == 0)
+            return;
+        float dx = root->get(index) - point.get(index);
+        index = (index + 1) % dimensions;
+        nearest(dx > 0 ? root->mLeft : root->mRight, point, index, fn);
+        if (dx * dx >= fn.mBestDistance)
+            return;
+        nearest(dx > 0 ? root->mRight : root->mLeft, point, index, fn);
+    }
+public:
+    KdTreeTemplate(const KdTreeTemplate&) = delete;
+    KdTreeTemplate& operator=(const KdTreeTemplate&) = delete;
+    /**
+     * Constructor taking a pair of iterators. Adds each
+     * point in the range [begin, end) to the tree.
+     *
+     * @param begin start of range
+     * @param end end of range
+     */
+    template<typename iterator>
+    KdTreeTemplate(iterator begin, iterator end) : mNodes(begin, end) 
+    {
+        mRoot = buildKdTree(0, mNodes.size(), 0);
+    }
+    
+
+    /**
+     * Returns true if the tree is empty, false otherwise.
+     */
+    bool empty() const 
+    { 
+        return mNodes.empty(); 
+    }
+
+    /**
+     * Returns the number of nodes visited by the last call
+     * to nearest().
+     */
+    size_t visited() const 
+    { return mVisitCount; 
+    }
+
+    /**
+     * Returns the distance between the input point and return value
+     * from the last call to nearest().
+     */
+    float distance() const 
+    { 
+        return std::sqrt(mBestDistance); 
+    }
+
+    /**
+     * Finds the nearest point in the tree to the given point.
+     * It is not valid to call this function if the tree is empty.
+     *
+     * @param pt a point
+     * @return the nearest point in the tree to the given point
+     */
+    const point_type& nearest(const point_type& pt) 
+    {
+        if (mRoot == nullptr)
+            throw std::logic_error("tree is empty");
+        FindNearest fn;
+        fn.mBest = nullptr;
+        fn.mVisitCount = 0;
+        fn.mBestDistance = 0;
+        nearest(mRoot, pt, 0, fn);
+        return fn.mBest->mPoint;
+    }
+};
+
+typedef point<float, 3> point3d;
+typedef KdTreeTemplate<float, 3> tree3d;
+
+//****
+
 class KdPoint
 {
 public:
     KdPoint(void) { };
-    KdPoint(float x,float y,float z)
+    KdPoint(float _x,float _y,float _z) : x(_x), y(_y), z(_z)
     {
-        mPos[0] = x;
-        mPos[1] = y;
-        mPos[2] = z;
     }
-    uint32_t      mId{ 0 };
-    float         mPos[3]{ 0,0,0 };
+    float   x;
+    float   y;
+    float   z;
+    uint32_t mId;
 };
 
-class KdNode
-{
-public:
-    KdPoint       mPoint;
-    KdNode       *mLeft{nullptr};
-    KdNode       *mRight{nullptr};
-};
-
-using KdNodeVector = std::vector< KdNode >;
+using Point3dVector = std::vector< point3d >;
 
 class KdTree
 {
@@ -305,166 +512,51 @@ public:
 
     ~KdTree(void)
     {
+        delete mTree;
     }
 
     void reservePoints(uint32_t pcount)
     {
-        mNodes.clear();
-        mNodes.reserve(pcount);
+        delete mTree;
+        mTree = nullptr;
+        mPoints.clear();
+        mPoints.reserve(pcount);
     }
 
     // Add this point...
     void addPoint(const KdPoint &p)
     {
-        KdNode n;
-        n.mPoint = p;
-        mNodes.push_back(n);
+        point3d pp(p.x,p.y,p.z);
+        pp.setId(p.mId);
+        mPoints.push_back(pp);
     }
 
     void buildTree(void)
     {
-        if( !mNodes.empty() )
-        {
-            uint32_t count = uint32_t(mNodes.size());
-            mRoot = buildTree(&mNodes[0],count,0);
-        }
+        mTree = new tree3d(std::begin(mPoints),std::end(mPoints));
     }
 
-    /**
-    * Note this returns the *squared distance*.
-    * If you want the exact distance you must perform a square root on
-    * the return value
-    */
     float findNearest(const KdPoint &p,KdPoint &result)
     {
         float ret = -1;
 
-        KdNode find;
-        find.mPoint = p;
-        const KdNode *best=nullptr;
-        float nearestDistanceSquared = FLT_MAX;
-        nearest(mRoot,&find,0,best,nearestDistanceSquared);
-        if ( best )
+        if ( mTree )
         {
-            ret = nearestDistanceSquared;
-            result = best->mPoint;
+            point3d pt(p.x,p.y,p.z);
+            point3d n = mTree->nearest(pt);
+            result.x = n.get(0);
+            result.y = n.get(1);
+            result.z = n.get(2);
+            result.mId = n.getId();
+            ret = n.distance(pt);
         }
+
         return ret;
     }
 
 private:
-
-    inline void swap(KdNode *a, KdNode *b)
-    {
-        KdNode temp;
-        temp.mPoint = a->mPoint;
-        a->mPoint = b->mPoint;
-        b->mPoint = temp.mPoint;
-    }
-
-    KdNode *findMedian(KdNode *start, KdNode *end, int idx)
-    {
-        if (end <= start) return nullptr;
-        if (end == start + 1)
-        {
-            return start;
-        }
-
-        KdNode *p, *store, *md = start + (end - start) / 2;
-        float pivot;
-        while (1)
-        {
-            pivot = md->mPoint.mPos[idx];
-
-            swap(md, end - 1);
-            for (store = p = start; p < end; p++)
-            {
-                if (p->mPoint.mPos[idx] < pivot)
-                {
-                    if (p != store)
-                    {
-                        swap(p, store);
-                    }
-                    store++;
-                }
-            }
-            swap(store, end - 1);
-
-            /* median has duplicate values */
-            if (store->mPoint.mPos[idx] == md->mPoint.mPos[idx])
-            {
-                break;
-            }
-
-            if (store > md)
-            {
-                end = store;
-            }
-            else
-            {
-                start = store;
-            }
-        }
-        return md;
-    }
-
-    KdNode *buildTree(KdNode *nodes, uint32_t nodeCount, uint32_t index)
-    {
-        KdNode *n;
-        if (nodeCount == 0) return nullptr;
-        if ((n = findMedian(nodes, nodes + nodeCount, index)))
-        {
-            index = (index + 1) % 3;
-            n->mLeft = buildTree(nodes, uint32_t(n - nodes), index);
-            n->mRight = buildTree(n + 1, uint32_t(nodes + nodeCount - (n + 1)), index);
-        }
-        return n;
-    }
-
-    float dist(const KdNode *a, const KdNode *b)
-    {
-        float dx = a->mPoint.mPos[0] - b->mPoint.mPos[0];
-        float dy = a->mPoint.mPos[1] - b->mPoint.mPos[1];
-        float dz = a->mPoint.mPos[2] - b->mPoint.mPos[2];
-        return dx * dx + dy * dy + dz * dz;
-    }
-
-    void nearest(const KdNode *root,
-        const KdNode *nd,
-        int index,
-        const KdNode *&best,
-        float &nearestDistanceSquared)
-    {
-        float d, dx, dx2;
-
-        if (!root) return;
-
-        d = dist(root, nd);
-        dx = root->mPoint.mPos[index] - nd->mPoint.mPos[index];
-        dx2 = dx * dx;
-
-        if (!best || d < nearestDistanceSquared)
-        {
-            nearestDistanceSquared = d;
-            best = root;
-        }
-
-        /* if chance of exact match is high */
-        if (nearestDistanceSquared == 0) return;
-
-        index = (index + 1) % 3;
-
-        nearest(dx > 0 ? root->mLeft : root->mRight, nd, index, best, nearestDistanceSquared);
-        if (dx2 >= nearestDistanceSquared) return;
-        nearest(dx > 0 ? root->mRight : root->mLeft, nd, index, best, nearestDistanceSquared);
-
-    }
-
-
-    KdNode          *mRoot{nullptr};
-    KdNodeVector    mNodes;
-
-
+    tree3d          *mTree{nullptr};
+    Point3dVector   mPoints;
 };
 
 
@@ -829,12 +921,9 @@ public:
         {
             mKdTree = new kdtree::KdTree;
             mKdTree->reservePoints(mK);
-            kdtree::KdPoint p;
             const auto &m = mMeans[0];
+            kdtree::KdPoint p(m.x,m.y,m.z);
             p.mId = 0;
-            p.mPos[0] = m.x;
-            p.mPos[1] = m.y;
-            p.mPos[2] = m.z;
             mKdTree->addPoint(p);
             mKdTree->buildTree();
         }
@@ -861,12 +950,9 @@ public:
             mMeans.push_back(mReducedData[generator(rand_engine)]);
             if ( params.mUseKdTree )
             {
-                kdtree::KdPoint p;
                 const auto &m = mMeans[index];
+                kdtree::KdPoint p(m.x,m.y,m.z);
                 p.mId = index;
-                p.mPos[0] = m.x;
-                p.mPos[1] = m.y;
-                p.mPos[2] = m.z;
                 mKdTree->addPoint(p);
                 timer::Timer tt;
                 mKdTree->buildTree();
@@ -973,10 +1059,7 @@ public:
             for (uint32_t i=0; i<msize; i++)
             {
                 const auto &p = means[i];
-                kdtree::KdPoint kp;
-                kp.mPos[0] = p.x;
-                kp.mPos[1] = p.y;
-                kp.mPos[2] = p.z;
+                kdtree::KdPoint kp(p.x,p.y,p.z);
                 kp.mId = i;
                 kdt.addPoint(kp);
             }
@@ -993,10 +1076,7 @@ public:
                         for (uint32_t i = pf->mStartIndex; i <= pf->mStopIndex; i++)
                         {
                             const auto &p = mData[i];
-                            kdtree::KdPoint kp;
-                            kp.mPos[0] = p.x;
-                            kp.mPos[1] = p.y;
-                            kp.mPos[2] = p.z;
+                            kdtree::KdPoint kp(p.x,p.y,p.z);
                             kdtree::KdPoint result;
                             kdtp->findNearest(kp, result);
                             mClusters[i] = result.mId;
@@ -1013,33 +1093,10 @@ public:
                 for (size_t i = 0; i < mData.size(); i++)
                 {
                     const auto &p = mData[i];
-                    kdtree::KdPoint kp;
-                    kp.mPos[0] = p.x;
-                    kp.mPos[1] = p.y;
-                    kp.mPos[2] = p.z;
+                    kdtree::KdPoint kp(p.x,p.y,p.z);
                     kdtree::KdPoint result;
                     kdt.findNearest(kp, result);
                     assert(result.mId < msize);
-                    uint32_t cid = closestMean(means, msize, mData[i]);
-                    if ( cid != result.mId )
-                    {
-                        static FILE *fph=nullptr;
-                        if ( fph == nullptr )
-                        {
-                            fph = fopen("kdtree.bin", "wb");
-                            uint32_t m = uint32_t(msize);
-                            fwrite(&m,sizeof(m),1,fph);
-                            for (uint32_t i=0; i<m; i++)
-                            {
-                                const Point3 &p = means[i];
-                                fwrite(&p,sizeof(p),1,fph);
-                            }
-                            fflush(fph);
-                        }
-                        Point3 &pf = mData[i];
-                        fwrite(&pf,sizeof(Point3),1,fph);
-                        fflush(fph);
-                    }
                     mClusters[i] = result.mId;
                 }
             }

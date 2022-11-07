@@ -55,11 +55,8 @@ void testKmeans(uint32_t pointCount,
 
 int main(int argc,const char **argv)
 {
-//    testKmeans(100000,1000,false,false);
-    //testKmeans(100000,1000,true,false);
-
-    testKmeans(1000,500,true,false);
-
-//    testKmeans(100000,1000,false,true);
-//    testKmeans(100000,1000,true,true);
+    testKmeans(100000,5000,false,false);
+    testKmeans(100000,5000,true,false);
+    testKmeans(100000,5000,false,true);
+    testKmeans(100000,5000,true,true);
 }
