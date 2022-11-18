@@ -567,9 +567,9 @@ namespace randpool
     class RandPool
     {
     public:
-        RandPool(uint32_t size, uint32_t seed) // size of random number bool.
+        RandPool(uint32_t size, uint32_t _seed) // size of random number bool.
         {
-            srand(seed);
+            mRandomEngine.seed(_seed);
             mData = new uint32_t[size];
             mSize = size;
             mTop = mSize;
@@ -599,7 +599,7 @@ namespace randpool
             {
                 shuffled = false;
             }
-            uint32_t entry = rand() % mTop;
+            uint32_t entry = uint32_t(mRandomEngine.operator()()) % mTop;
             mTop--;
             uint32_t ret = mData[entry]; // swap top of pool with entry
             mData[entry] = mData[mTop]; // returned
@@ -612,9 +612,8 @@ namespace randpool
         uint32_t* mData; // random number bool.
         uint32_t mSize; // size of random number pool.
         uint32_t mTop; // current top of the random number pool.
+        std::linear_congruential_engine<uint64_t, 6364136223846793005, 1442695040888963407, UINT64_MAX> mRandomEngine;
     };
-
-
 }
 
 namespace kmeans
