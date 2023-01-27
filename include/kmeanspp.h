@@ -1047,7 +1047,6 @@ public:
             }
         }
     }
-#endif
 
     void calculateClusters(const Point3 *means,size_t msize,bool useKdTree)
     {
@@ -1201,3 +1200,5 @@ Kmeans *Kmeans::create(void)
 
 
 }
+#endif
+
